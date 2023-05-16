@@ -745,7 +745,7 @@ class PersistableRecordTests: GRDBTestCase {
         }
     }
     
-    func testPersistenceErrorPersistableRecordCustomizedCountry() throws {
+    func testRecordErrorPersistableRecordCustomizedCountry() throws {
         let country = PersistableRecordCustomizedCountry(
             isoCode: "FR",
             name: "France")
@@ -755,8 +755,8 @@ class PersistableRecordTests: GRDBTestCase {
             try dbQueue.inDatabase { db in
                 try country.update(db)
             }
-            XCTFail("Expected PersistenceError")
-        } catch PersistenceError.recordNotFound(databaseTableName: "countries", key: ["isoCode": "FR".databaseValue]) { }
+            XCTFail("Expected RecordError")
+        } catch RecordError.recordNotFound(databaseTableName: "countries", key: ["isoCode": "FR".databaseValue]) { }
         
         XCTAssertEqual(country.callbacks.willInsertCount, 0)
         XCTAssertEqual(country.callbacks.aroundInsertEnterCount, 0)
@@ -1332,7 +1332,7 @@ extension PersistableRecordTests {
             throw XCTSkip("RETURNING clause is not available")
         }
 #else
-        guard #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macOS 12.0, *) else {
+        guard #available(iOS 15, macOS 12, tvOS 15, watchOS 8, *) else {
             throw XCTSkip("RETURNING clause is not available")
         }
 #endif
@@ -1381,7 +1381,7 @@ extension PersistableRecordTests {
             throw XCTSkip("RETURNING clause is not available")
         }
 #else
-        guard #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macOS 12.0, *) else {
+        guard #available(iOS 15, macOS 12, tvOS 15, watchOS 8, *) else {
             throw XCTSkip("RETURNING clause is not available")
         }
 #endif
@@ -1434,7 +1434,7 @@ extension PersistableRecordTests {
             throw XCTSkip("RETURNING clause is not available")
         }
 #else
-        guard #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macOS 12.0, *) else {
+        guard #available(iOS 15, macOS 12, tvOS 15, watchOS 8, *) else {
             throw XCTSkip("RETURNING clause is not available")
         }
 #endif
@@ -1557,7 +1557,7 @@ extension PersistableRecordTests {
             throw XCTSkip("RETURNING clause is not available")
         }
 #else
-        guard #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macOS 12.0, *) else {
+        guard #available(iOS 15, macOS 12, tvOS 15, watchOS 8, *) else {
             throw XCTSkip("RETURNING clause is not available")
         }
 #endif
@@ -1684,7 +1684,7 @@ extension PersistableRecordTests {
             throw XCTSkip("UPSERT is not available")
         }
 #else
-        guard #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macOS 12.0, *) else {
+        guard #available(iOS 15, macOS 12, tvOS 15, watchOS 8, *) else {
             throw XCTSkip("UPSERT is not available")
         }
 #endif
@@ -1821,7 +1821,7 @@ extension PersistableRecordTests {
             throw XCTSkip("UPSERT is not available")
         }
 #else
-        guard #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macOS 12.0, *) else {
+        guard #available(iOS 15, macOS 12, tvOS 15, watchOS 8, *) else {
             throw XCTSkip("UPSERT is not available")
         }
 #endif
@@ -1966,7 +1966,7 @@ extension PersistableRecordTests {
             throw XCTSkip("UPSERT is not available")
         }
 #else
-        guard #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macOS 12.0, *) else {
+        guard #available(iOS 15, macOS 12, tvOS 15, watchOS 8, *) else {
             throw XCTSkip("UPSERT is not available")
         }
 #endif
@@ -2069,7 +2069,7 @@ extension PersistableRecordTests {
             throw XCTSkip("UPSERT is not available")
         }
 #else
-        guard #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macOS 12.0, *) else {
+        guard #available(iOS 15, macOS 12, tvOS 15, watchOS 8, *) else {
             throw XCTSkip("UPSERT is not available")
         }
 #endif

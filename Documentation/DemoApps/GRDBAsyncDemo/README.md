@@ -13,8 +13,8 @@ The topics covered in this demo are:
 
 - How to setup a database in an iOS app.
 - How to define a simple [Codable Record](../../../README.md#codable-records).
-- How to track database changes and animate a SwiftUI List with an async sequence built from [ValueObservation](../../../README.md#valueobservation).
-- How to apply the recommendations of [Good Practices for Designing Record Types](../../GoodPracticesForDesigningRecordTypes.md).
+- How to track database changes and animate a SwiftUI List with an async sequence built from [ValueObservation](https://swiftpackageindex.com/groue/grdb.swift/documentation/grdb/valueobservation).
+- How to apply the recommendations of [Recommended Practices for Designing Record Types](https://swiftpackageindex.com/groue/grdb.swift/documentation/grdb/recordrecommendedpractices).
 - How to feed SwiftUI previews with a transient database.
 
 **Files of interest:**
@@ -25,7 +25,7 @@ The topics covered in this demo are:
 
 - [AppDatabase.swift](GRDBAsyncDemo/AppDatabase.swift)
     
-    `AppDatabase` is the type that grants database access. It uses [DatabaseMigrator](../../Migrations.md) in order to setup the database schema.
+    `AppDatabase` is the type that grants database access. It uses [DatabaseMigrator](https://swiftpackageindex.com/groue/grdb.swift/documentation/grdb/databasemigrator) in order to setup the database schema.
 
 - [Persistence.swift](GRDBAsyncDemo/Persistence.swift)
     

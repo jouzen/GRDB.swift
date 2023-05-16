@@ -18,13 +18,17 @@ import Foundation
 /// reducing stage.
 ///
 /// **Notify** is calling user callbacks, in case of database change or error.
-final class ValueWriteOnlyObserver<Writer: DatabaseWriter, Reducer: ValueReducer> {
+final class ValueWriteOnlyObserver<
+    Writer: DatabaseWriter,
+    Reducer: ValueReducer,
+    Scheduler: ValueObservationScheduler>
+{
     // MARK: - Configuration
     //
     // Configuration is not mutable.
     
     /// How to schedule observed values and errors.
-    private let scheduler: ValueObservationScheduler
+    private let scheduler: Scheduler
     
     /// Configures the tracked database region.
     private let trackingMode: ValueObservationTrackingMode
@@ -141,7 +145,7 @@ final class ValueWriteOnlyObserver<Writer: DatabaseWriter, Reducer: ValueReducer
     
     init(
         writer: Writer,
-        scheduler: ValueObservationScheduler,
+        scheduler: Scheduler,
         readOnly: Bool,
         trackingMode: ValueObservationTrackingMode,
         reducer: Reducer,
@@ -403,7 +407,7 @@ extension ValueWriteOnlyObserver: TransactionObserver {
                     let value = try self.reducer._value(fetchedValue)
                     
                     // Notify value
-                    if let value = value {
+                    if let value {
                         self.scheduler.schedule {
                             let onChange = self.lock.synchronized { self.notificationCallbacks?.onChange }
                             guard let onChange else { return /* Cancelled */ }

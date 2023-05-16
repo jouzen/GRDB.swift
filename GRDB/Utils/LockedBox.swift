@@ -26,6 +26,8 @@ final class LockedBox<T> {
     ///     $count.read { print($0) }
     ///
     /// - parameter block: A closure that accepts the value.
+    @inline(__always)
+    @usableFromInline
     func read<U>(_ block: (T) throws -> U) rethrows -> U {
         lock.lock()
         defer { lock.unlock() }
@@ -66,3 +68,5 @@ extension LockedBox where T: Numeric {
         }
     }
 }
+
+extension LockedBox: @unchecked Sendable where T: Sendable { }

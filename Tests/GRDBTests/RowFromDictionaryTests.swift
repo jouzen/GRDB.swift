@@ -27,7 +27,7 @@ class RowFromDictionaryTests : RowTestCase {
     }
     
     func testRowValueAtIndex() {
-        let dictionary: [String: DatabaseValueConvertible?] = ["a": 0, "b": 1, "c": 2]
+        let dictionary: [String: (any DatabaseValueConvertible)?] = ["a": 0, "b": 1, "c": 2]
         let row = Row(dictionary)
         
         let aIndex = dictionary.distance(from: dictionary.startIndex, to: dictionary.index(forKey: "a")!)
@@ -93,34 +93,37 @@ class RowFromDictionaryTests : RowTestCase {
         assertRowConvertedValueEqual(row, column: Column("c"), value: CustomValue.c)
     }
     
-    func testDataNoCopy() {
+    func testWithUnsafeData() throws {
         do {
             let data = "foo".data(using: .utf8)!
-            let row = Row(["a": data])
+            let row: Row = ["a": data]
             
-            XCTAssertEqual(row.dataNoCopy(atIndex: 0), data)
-            XCTAssertEqual(row.dataNoCopy(named: "a"), data)
-            XCTAssertEqual(row.dataNoCopy(Column("a")), data)
+            try row.withUnsafeData(atIndex: 0) { XCTAssertEqual($0, data) }
+            try row.withUnsafeData(named: "a") { XCTAssertEqual($0, data) }
+            try row.withUnsafeData(at: Column("a")) { XCTAssertEqual($0, data) }
+            
+            try row.withUnsafeData(named: "missing") { XCTAssertNil($0) }
+            try row.withUnsafeData(at: Column("missing")) { XCTAssertNil($0) }
         }
         do {
             let emptyData = Data()
-            let row = Row(["a": emptyData])
+            let row: Row = ["a": emptyData]
             
-            XCTAssertEqual(row.dataNoCopy(atIndex: 0), emptyData)
-            XCTAssertEqual(row.dataNoCopy(named: "a"), emptyData)
-            XCTAssertEqual(row.dataNoCopy(Column("a")), emptyData)
+            try row.withUnsafeData(atIndex: 0) { XCTAssertEqual($0, emptyData) }
+            try row.withUnsafeData(named: "a") { XCTAssertEqual($0, emptyData) }
+            try row.withUnsafeData(at: Column("a")) { XCTAssertEqual($0, emptyData) }
         }
         do {
-            let row = Row(["a": nil])
+            let row: Row = ["a": nil]
             
-            XCTAssertNil(row.dataNoCopy(atIndex: 0))
-            XCTAssertNil(row.dataNoCopy(named: "a"))
-            XCTAssertNil(row.dataNoCopy(Column("a")))
+            try row.withUnsafeData(atIndex: 0) { XCTAssertNil($0) }
+            try row.withUnsafeData(named: "a") { XCTAssertNil($0) }
+            try row.withUnsafeData(at: Column("a")) { XCTAssertNil($0) }
         }
     }
     
     func testRowDatabaseValueAtIndex() throws {
-        let dictionary: [String: DatabaseValueConvertible?] = ["null": nil, "int64": 1, "double": 1.1, "string": "foo", "blob": "SQLite".data(using: .utf8)]
+        let dictionary: [String: (any DatabaseValueConvertible)?] = ["null": nil, "int64": 1, "double": 1.1, "string": "foo", "blob": "SQLite".data(using: .utf8)]
         let row = Row(dictionary)
         
         let nullIndex = dictionary.distance(from: dictionary.startIndex, to: dictionary.index(forKey: "null")!)
@@ -137,7 +140,7 @@ class RowFromDictionaryTests : RowTestCase {
     }
 
     func testRowDatabaseValueNamed() throws {
-        let dictionary: [String: DatabaseValueConvertible?] = ["null": nil, "int64": 1, "double": 1.1, "string": "foo", "blob": "SQLite".data(using: .utf8)]
+        let dictionary: [String: (any DatabaseValueConvertible)?] = ["null": nil, "int64": 1, "double": 1.1, "string": "foo", "blob": "SQLite".data(using: .utf8)]
         let row = Row(dictionary)
         
         guard case .null = (row["null"] as DatabaseValue).storage else { XCTFail(); return }

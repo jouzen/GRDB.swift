@@ -22,7 +22,7 @@ class DatabaseReaderReadPublisherTests : XCTestCase {
     // MARK: -
     
     func testReadPublisher() throws {
-        guard #available(OSX 10.15, iOS 13, tvOS 13, watchOS 6, *) else {
+        guard #available(iOS 13, macOS 10.15, tvOS 13, watchOS 6, *) else {
             throw XCTSkip("Combine is not available")
         }
         
@@ -44,6 +44,9 @@ class DatabaseReaderReadPublisherTests : XCTestCase {
         try Test(test).runAtTemporaryDatabasePath { try setUp(DatabaseQueue(path: $0)) }
         try Test(test).runAtTemporaryDatabasePath { try setUp(DatabasePool(path: $0)) }
         try Test(test).runAtTemporaryDatabasePath { try setUp(DatabasePool(path: $0)).makeSnapshot() }
+#if SQLITE_ENABLE_SNAPSHOT || (!GRDBCUSTOMSQLITE && !GRDBCIPHER && (compiler(>=5.7.1) || !(os(macOS) || targetEnvironment(macCatalyst))))
+        try Test(test).runAtTemporaryDatabasePath { try setUp(DatabasePool(path: $0)).makeSnapshotPool() }
+#endif
     }
     
     // MARK: -
@@ -125,7 +128,7 @@ class DatabaseReaderReadPublisherTests : XCTestCase {
     //     frame #71: 0x00007fff72311cc9 libdyld.dylib`start + 1
     //     frame #72: 0x00007fff72311cc9 libdyld.dylib`start + 1
     func testReadPublisherError() throws {
-        guard #available(OSX 10.15, iOS 13, tvOS 13, watchOS 6, *) else {
+        guard #available(iOS 13, macOS 10.15, tvOS 13, watchOS 6, *) else {
             throw XCTSkip("Combine is not available")
         }
         
@@ -146,12 +149,15 @@ class DatabaseReaderReadPublisherTests : XCTestCase {
         try Test(test).runAtTemporaryDatabasePath { try DatabaseQueue(path: $0) }
         try Test(test).runAtTemporaryDatabasePath { try DatabasePool(path: $0) }
         try Test(test).runAtTemporaryDatabasePath { try DatabasePool(path: $0).makeSnapshot() }
+#if SQLITE_ENABLE_SNAPSHOT || (!GRDBCUSTOMSQLITE && !GRDBCIPHER && (compiler(>=5.7.1) || !(os(macOS) || targetEnvironment(macCatalyst))))
+        try Test(test).runAtTemporaryDatabasePath { try DatabasePool(path: $0).makeSnapshotPool() }
+#endif
     }
     
     // MARK: -
     
     func testReadPublisherIsAsynchronous() throws {
-        guard #available(OSX 10.15, iOS 13, tvOS 13, watchOS 6, *) else {
+        guard #available(iOS 13, macOS 10.15, tvOS 13, watchOS 6, *) else {
             throw XCTSkip("Combine is not available")
         }
         
@@ -183,12 +189,15 @@ class DatabaseReaderReadPublisherTests : XCTestCase {
         try Test(test).runAtTemporaryDatabasePath { try setUp(DatabaseQueue(path: $0)) }
         try Test(test).runAtTemporaryDatabasePath { try setUp(DatabasePool(path: $0)) }
         try Test(test).runAtTemporaryDatabasePath { try setUp(DatabasePool(path: $0)).makeSnapshot() }
+#if SQLITE_ENABLE_SNAPSHOT || (!GRDBCUSTOMSQLITE && !GRDBCIPHER && (compiler(>=5.7.1) || !(os(macOS) || targetEnvironment(macCatalyst))))
+        try Test(test).runAtTemporaryDatabasePath { try setUp(DatabasePool(path: $0)).makeSnapshotPool() }
+#endif
     }
     
     // MARK: -
     
     func testReadPublisherDefaultScheduler() throws {
-        guard #available(OSX 10.15, iOS 13, tvOS 13, watchOS 6, *) else {
+        guard #available(iOS 13, macOS 10.15, tvOS 13, watchOS 6, *) else {
             throw XCTSkip("Combine is not available")
         }
         
@@ -220,12 +229,15 @@ class DatabaseReaderReadPublisherTests : XCTestCase {
         try Test(test).runAtTemporaryDatabasePath { try setUp(DatabaseQueue(path: $0)) }
         try Test(test).runAtTemporaryDatabasePath { try setUp(DatabasePool(path: $0)) }
         try Test(test).runAtTemporaryDatabasePath { try setUp(DatabasePool(path: $0)).makeSnapshot() }
+#if SQLITE_ENABLE_SNAPSHOT || (!GRDBCUSTOMSQLITE && !GRDBCIPHER && (compiler(>=5.7.1) || !(os(macOS) || targetEnvironment(macCatalyst))))
+        try Test(test).runAtTemporaryDatabasePath { try setUp(DatabasePool(path: $0)).makeSnapshotPool() }
+#endif
     }
     
     // MARK: -
     
     func testReadPublisherCustomScheduler() throws {
-        guard #available(OSX 10.15, iOS 13, tvOS 13, watchOS 6, *) else {
+        guard #available(iOS 13, macOS 10.15, tvOS 13, watchOS 6, *) else {
             throw XCTSkip("Combine is not available")
         }
         
@@ -258,12 +270,15 @@ class DatabaseReaderReadPublisherTests : XCTestCase {
         try Test(test).runAtTemporaryDatabasePath { try setUp(DatabaseQueue(path: $0)) }
         try Test(test).runAtTemporaryDatabasePath { try setUp(DatabasePool(path: $0)) }
         try Test(test).runAtTemporaryDatabasePath { try setUp(DatabasePool(path: $0)).makeSnapshot() }
+#if SQLITE_ENABLE_SNAPSHOT || (!GRDBCUSTOMSQLITE && !GRDBCIPHER && (compiler(>=5.7.1) || !(os(macOS) || targetEnvironment(macCatalyst))))
+        try Test(test).runAtTemporaryDatabasePath { try setUp(DatabasePool(path: $0)).makeSnapshotPool() }
+#endif
     }
     
     // MARK: -
     
     func testReadPublisherIsReadonly() throws {
-        guard #available(OSX 10.15, iOS 13, tvOS 13, watchOS 6, *) else {
+        guard #available(iOS 13, macOS 10.15, tvOS 13, watchOS 6, *) else {
             throw XCTSkip("Combine is not available")
         }
         
@@ -283,6 +298,9 @@ class DatabaseReaderReadPublisherTests : XCTestCase {
         try Test(test).runAtTemporaryDatabasePath { try DatabaseQueue(path: $0) }
         try Test(test).runAtTemporaryDatabasePath { try DatabasePool(path: $0) }
         try Test(test).runAtTemporaryDatabasePath { try DatabasePool(path: $0).makeSnapshot() }
+#if SQLITE_ENABLE_SNAPSHOT || (!GRDBCUSTOMSQLITE && !GRDBCIPHER && (compiler(>=5.7.1) || !(os(macOS) || targetEnvironment(macCatalyst))))
+        try Test(test).runAtTemporaryDatabasePath { try DatabasePool(path: $0).makeSnapshotPool() }
+#endif
     }
 }
 #endif

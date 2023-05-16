@@ -1,25 +1,137 @@
 import Foundation
 
-/// Returns an array of row adapters that split a row according to the input
-/// number of columns.
+/// Returns an array of row adapters that split a row according to the
+/// provided numbers of columns.
 ///
-/// For example:
+/// This method is useful for splitting a row into chunks.
 ///
-///     let sql = "SELECT 1, 2,3,4, 5,6, 7,8"
-///     //               <.><. . .><. .><. .>
-///     let adapters = splittingRowAdapters([1, 3, 2])
-///     let adapter = ScopeAdapter([
-///         "a": adapters[0],
-///         "b": adapters[1],
-///         "c": adapters[2],
-///         "d": adapters[3]])
-///     let row = try Row.fetchOne(db, sql: sql, adapter: adapter)
-///     row.scopes["a"] // [1]
-///     row.scopes["b"] // [2, 3, 4]
-///     row.scopes["c"] // [5, 6]
-///     row.scopes["d"] // [7, 8]
+/// For example, let's consider the following SQL query:
+///
+/// ```swift
+/// let sql = """
+///     SELECT player.*, team.*
+///     FROM player
+///     LEFT JOIN team ON team.id = player.teamId
+///     WHERE player.id = ?
+///     """
+/// ```
+///
+/// The resulting rows contains columns from both player and team tables:
+///
+/// ```swift
+/// // [id: 1, name: "Arthur", teamId: 42, id: 42, name: "Reds"]
+/// // <---------------------------------><-------------------->
+/// //            player columns               team columns
+/// let row = try Row.fetchOne(db, sql: sql, arguments: [1])
+/// ```
+///
+/// Because some columns have the same name (`id` and `name`), it is
+/// difficult to access the team columns.
+///
+/// `splittingRowAdapters` and ``ScopeAdapter`` make it possible to
+/// access player and team columns independently, with row ``Row/scopes``:
+///
+/// ```swift
+/// let adapters = try splittingRowAdapters([
+///     db.columns(in: "player").count,
+///     db.columns(in: "team").count,
+/// ])
+/// let adapter = ScopeAdapter([
+///     "player": adapters[0],
+///     "team": adapters[1],
+/// ])
+/// if let row = try Row.fetchOne(db, sql: sql, arguments: [1], adapter: adapter) {
+///     // A Row that only contains player columns
+///     // [id: 1, name: "Arthur", teamId: 42]
+///     row.scopes["player"]
+///
+///     // A Row that only contains team columns
+///     // [id: 42, name: "Reds"]
+///     row.scopes["team"]
+/// }
+/// ```
+///
+/// Decoding ``FetchableRecord`` types is easy:
+///
+/// ```swift
+/// if let row = try Row.fetchOne(db, sql: sql, arguments: [1], adapter: adapter) {
+///     // Player(id: 1, name: "Arthur", teamId: 42)
+///     let player: Player = row["player"]
+///
+///     // Team(id: 42, name: "Reds")
+///     // nil if the LEFT JOIN has fetched NULL team columns
+///     if let team: Team? = row["team"]
+/// }
+/// ```
+///
+/// You can package this technique in a dedicated type, as in the next
+/// example. It enhances the previous sample codes with:
+///
+/// - Support for record types that customize their fetched columns
+///   with ``TableRecord/databaseSelection-7iphs``.
+/// - ``SQLRequest`` and its support for [SQL Interpolation](https://github.com/groue/GRDB.swift/blob/master/Documentation/SQLInterpolation.md).
+/// - ``FetchRequest/adapted(_:)`` for building a request that embeds the
+///   row adapters.
+///
+/// ```swift
+/// struct Player: TableRecord, FetchableRecord { ... }
+/// struct Team: TableRecord, FetchableRecord { ... }
+///
+/// struct PlayerInfo {
+///     var player: Player
+///     var team: Team?
+/// }
+///
+/// extension PlayerInfo: FetchableRecord {
+///     init(row: Row) {
+///         player = row["player"]
+///         team = row["team"]
+///     }
+/// }
+///
+/// extension PlayerInfo {
+///     /// The request for the player info, given a player id
+///     static func filter(playerId: Int64) -> some FetchRequest<PlayerInfo> {
+///         // Build SQL request with SQL interpolation
+///         let request: SQLRequest<PlayerInfo> = """
+///             SELECT
+///                 \(columnsOf: Player.self), -- Instead of player.*
+///                 \(columnsOf: Team.self),   -- Instead of team.*
+///             FROM player
+///             LEFT JOIN team ON team.id = player.teamId
+///             WHERE player.id = \(playerId)
+///             """
+///
+///         // Returns an adapted request that defines the player and team
+///         // scopes in the fetched row
+///         return request.adapted { db in
+///             let adapters = try splittingRowAdapters(columnCounts: [
+///                 Player.numberOfSelectedColumns(db),
+///                 Team.numberOfSelectedColumns(db),
+///             ])
+///             return ScopeAdapter([
+///                 "player": adapters[0],
+///                 "team": adapters[1],
+///             ])
+///         }
+///     }
+/// }
+///
+/// // Usage
+/// try dbQueue.read { db in
+///     if let playerInfo = try PlayerInfo.filter(playerId: 1).fetchOne(db) {
+///         print(playerInfo.player) // Player(id: 1, name: "Arthur", teamId: 42)
+///         print(playerInfo.team)   // Team(id: 42, name: "Reds")
+///     }
+/// }
+/// ```
+///
+/// - parameter columnCounts: An array of row chunk lengths.
+/// - returns: An array of row adapters that split a row into as many chunks
+///   as the number of elements in `columnCounts`, plus one (the row adapter
+///   for all columns that remain on the right of the last chunk).
 public func splittingRowAdapters(columnCounts: [Int]) -> [any RowAdapter] {
-    guard !columnCounts.isEmpty else {
+    if columnCounts.isEmpty {
         // Identity adapter
         return [SuffixRowAdapter(fromIndex: 0)]
     }
@@ -41,8 +153,6 @@ public func splittingRowAdapters(columnCounts: [Int]) -> [any RowAdapter] {
 }
 
 /// _LayoutedColumnMapping is a type that supports the RowAdapter protocol.
-///
-/// :nodoc:
 public struct _LayoutedColumnMapping {
     /// An array of (baseIndex, mappedName) pairs, where baseIndex is the index
     /// of a column in a base row, and mappedName the mapped name of
@@ -93,7 +203,6 @@ public struct _LayoutedColumnMapping {
     }
 }
 
-/// :nodoc:
 extension _LayoutedColumnMapping: _LayoutedRowAdapter {
     /// Returns self.
     public var _mapping: _LayoutedColumnMapping { self }
@@ -102,7 +211,6 @@ extension _LayoutedColumnMapping: _LayoutedRowAdapter {
     public var _scopes: [String: any _LayoutedRowAdapter] { [:] }
 }
 
-/// :nodoc:
 extension _LayoutedColumnMapping: _RowLayout {
     /// Returns the index of the leftmost column named `name`, in a
     /// case-insensitive way.
@@ -118,8 +226,6 @@ extension _LayoutedColumnMapping: _RowLayout {
 ///
 /// GRBD ships with a ready-made type that adopts this protocol:
 /// `_LayoutedColumnMapping`.
-///
-/// :nodoc:
 public protocol _LayoutedRowAdapter {
     /// A LayoutedColumnMapping that defines how to map a column name to a
     /// column in a base row.
@@ -131,8 +237,6 @@ public protocol _LayoutedRowAdapter {
 
 /// `_RowLayout` is a protocol that supports the `RowAdapter` protocol. It
 /// describes the layout of a base row.
-///
-/// :nodoc:
 public protocol _RowLayout {
     /// An array of (baseIndex, name) pairs, where baseIndex is the index
     /// of a column in a base row, and name the name of that column.
@@ -144,21 +248,77 @@ public protocol _RowLayout {
 }
 
 extension Statement: _RowLayout {
-    /// :nodoc:
     public var _layoutColumns: [(Int, String)] {
         Array(columnNames.enumerated())
     }
     
-    /// :nodoc:
     public func _layoutIndex(ofColumn name: String) -> Int? {
         index(ofColumn: name)
     }
 }
 
-/// Implementation details of `RowAdapter`.
+/// A type that helps two incompatible row interfaces working together.
 ///
-/// :nodoc:
-public protocol _RowAdapter {
+/// Row adapters present database rows in the way expected by the
+/// row consumers.
+///
+/// For example, when a row consumer expects a column named "consumed", but
+/// the raw row has a column named "produced", the ``ColumnMapping`` row
+/// adapter comes in handy:
+///
+/// ```swift
+/// // Feeds the "consumed" column from "produced":
+/// let adapter = ColumnMapping(["consumed": "produced"])
+/// let sql = "SELECT 'Hello' AS produced"
+/// let row = try Row.fetchOne(db, sql: sql, adapter: adapter)!
+///
+/// // [consumed:"Hello"]
+/// print(row)
+///
+/// // "Hello"
+/// print(row["consumed"])
+/// ```
+///
+/// The raw fetched columns are not lost (see ``Row/unadapted``):
+///
+/// ```swift
+/// // ▿ [consumed:"Hello"]
+/// //   unadapted: [produced:"Hello"]
+/// print(row.debugDescription)
+///
+/// // [produced:"Hello"]
+/// print(row.unadapted)
+/// ```
+///
+/// There are several situations where row adapters are useful. Among them:
+///
+/// - Adapters help disambiguate columns with identical names, which may
+///   happen when you select columns from several tables.
+///   See ``splittingRowAdapters(columnCounts:)`` for some sample code.
+///
+/// - Adapters help when SQLite outputs unexpected column names, which may
+///   happen with some subqueries. See ``RenameColumnAdapter`` for
+///   an example.
+///
+/// ## Topics
+///
+/// ### Splitting a Row into Chunks
+///
+/// - ``splittingRowAdapters(columnCounts:)``
+///
+/// ### Adding Scopes to an Adapter
+///
+/// - ``addingScopes(_:)``
+///
+/// ### Built-in Adapters
+///
+/// - ``ColumnMapping``
+/// - ``EmptyRowAdapter``
+/// - ``RangeRowAdapter``
+/// - ``RenameColumnAdapter``
+/// - ``ScopeAdapter``
+/// - ``SuffixRowAdapter``
+public protocol RowAdapter {
     /// You never call this method directly. It is called for you whenever an
     /// adapter has to be applied.
     ///
@@ -180,27 +340,6 @@ public protocol _RowAdapter {
     ///     try Row.fetchOne(db, sql: "SELECT 1, 2, 3", adapter: FirstColumnAdapter())
     func _layoutedAdapter(from layout: some _RowLayout) throws -> any _LayoutedRowAdapter
 }
-
-/// `RowAdapter` is a protocol that helps two incompatible row interfaces
-/// working together.
-///
-/// GRDB ships with four concrete types that adopt the RowAdapter protocol:
-///
-/// - `ColumnMapping`: renames row columns
-/// - `EmptyRowAdapter`: hides all columns
-/// - `RangeRowAdapter`: exposes a range of columns
-/// - `RenameColumnAdapter`: transforms column names with a function
-/// - `ScopeAdapter`: defines row scopes
-/// - `SuffixRowAdapter`: hides the first columns of a row
-///
-/// To use a row adapter, provide it to any method that fetches:
-///
-///     let adapter = SuffixRowAdapter(fromIndex: 2)
-///     let sql = "SELECT 1 AS foo, 2 AS bar, 3 AS baz"
-///
-///     // [baz:3]
-///     try Row.fetchOne(db, sql: sql, adapter: adapter)
-public protocol RowAdapter: _RowAdapter { }
 
 extension RowAdapter {
     /// Returns an adapter based on self, with added scopes.
@@ -225,35 +364,55 @@ extension RowAdapter {
     }
 }
 
-/// EmptyRowAdapter is a row adapter that hides all columns.
+/// `EmptyRowAdapter` is a row adapter that hides all columns.
+///
+/// For example:
+///
+/// ```swift
+/// let adapter = EmptyRowAdapter()
+/// let sql = "SELECT 0 AS a, 1 AS b, 2 AS c"
+///
+/// let row = try Row.fetchOne(db, sql: sql, adapter: adapter)!
+/// row.isEmpty // true
+/// ```
+///
+/// This limit adapter may turn out useful in some narrow use cases. You'll
+/// be happy to find it when you need it.
 public struct EmptyRowAdapter: RowAdapter {
-    /// Creates an EmptyRowAdapter
+    /// Creates an `EmptyRowAdapter`.
     public init() { }
     
-    /// :nodoc:
     public func _layoutedAdapter(from layout: some _RowLayout) throws -> any _LayoutedRowAdapter {
         _LayoutedColumnMapping(layoutColumns: [])
     }
 }
 
-/// ColumnMapping is a row adapter that maps column names.
+/// `ColumnMapping` is a row adapter that maps column names.
 ///
-///     let adapter = ColumnMapping(["foo": "bar"])
-///     let sql = "SELECT 'foo' AS foo, 'bar' AS bar, 'baz' AS baz"
+/// Build a `ColumnMapping` with a dictionary whose keys
+/// are adapted column names, and values the column names in the base row:
 ///
-///     // [foo:"bar"]
-///     try Row.fetchOne(db, sql: sql, adapter: adapter)
+/// ```swift
+/// // Feeds "newA" from "a", and "newB" from "b":
+/// let adapter = ColumnMapping(["newA": "a", "newB": "b"])
+/// let sql = "SELECT 0 AS a, 1 AS b, 2 AS c"
+///
+/// // [newA:0, newB:1]
+/// let row = try Row.fetchOne(db, sql: sql, adapter: adapter)!
+/// ```
+///
+/// Note that columns that are not present in the dictionary are not present
+/// in the resulting adapted row.
 public struct ColumnMapping: RowAdapter {
     /// A dictionary from mapped column names to column names in a base row.
     let mapping: [String: String]
     
-    /// Creates a ColumnMapping with a dictionary from mapped column names to
-    /// column names in a base row.
+    /// Creates a `ColumnMapping` with a dictionary from mapped column names
+    /// to column names in a base row.
     public init(_ mapping: [String: String]) {
         self.mapping = mapping
     }
     
-    /// :nodoc:
     public func _layoutedAdapter(from layout: some _RowLayout) throws -> any _LayoutedRowAdapter {
         let layoutColumns = try mapping
             .map { (mappedColumn, baseColumn) -> (Int, String) in
@@ -274,13 +433,17 @@ public struct ColumnMapping: RowAdapter {
     }
 }
 
-/// SuffixRowAdapter is a row adapter that hides the first columns in a row.
+/// `SuffixRowAdapter` hides the leftmost columns in a row.
 ///
-///     let adapter = SuffixRowAdapter(fromIndex: 2)
-///     let sql = "SELECT 1 AS foo, 2 AS bar, 3 AS baz"
+/// For example:
 ///
-///     // [baz:3]
-///     try Row.fetchOne(db, sql: sql, adapter: adapter)
+/// ```swift
+/// let adapter = SuffixRowAdapter(fromIndex: 2)
+/// let sql = "SELECT 0 AS a, 1 AS b, 2 AS c, 3 AS d"
+///
+/// // [c:2, d: 3]
+/// try Row.fetchOne(db, sql: sql, adapter: adapter)!
+/// ```
 public struct SuffixRowAdapter: RowAdapter {
     /// The suffix index
     let index: Int
@@ -294,19 +457,22 @@ public struct SuffixRowAdapter: RowAdapter {
         self.index = index
     }
     
-    /// :nodoc:
     public func _layoutedAdapter(from layout: some _RowLayout) throws -> any _LayoutedRowAdapter {
         _LayoutedColumnMapping(layoutColumns: layout._layoutColumns.suffix(from: index))
     }
 }
 
-/// RangeRowAdapter is a row adapter that only exposes a range of columns.
+/// `RangeRowAdapter` is a row adapter that only exposes a range of columns.
 ///
-///     let adapter = RangeRowAdapter(1..<3)
-///     let sql = "SELECT 1 AS foo, 2 AS bar, 3 AS baz, 4 as qux"
+/// For example:
 ///
-///     // [bar:2 baz:3]
-///     try Row.fetchOne(db, sql: sql, adapter: adapter)
+/// ```swift
+/// let adapter = RangeRowAdapter(1..<3)
+/// let sql = "SELECT 0 AS a, 1 AS b, 2 AS c, 3 AS d"
+///
+/// // [b:1 c:2]
+/// try Row.fetchOne(db, sql: sql, adapter: adapter)
+/// ```
 public struct RangeRowAdapter: RowAdapter {
     /// The range
     let range: CountableRange<Int>
@@ -323,34 +489,70 @@ public struct RangeRowAdapter: RowAdapter {
         self.range = range.lowerBound..<(range.upperBound + 1)
     }
     
-    /// :nodoc:
     public func _layoutedAdapter(from layout: some _RowLayout) throws -> any _LayoutedRowAdapter {
         _LayoutedColumnMapping(layoutColumns: layout._layoutColumns[range])
     }
 }
 
-/// `ScopeAdapter` is a row adapter that lets you define scopes on rows.
+/// `ScopeAdapter` is a row adapter that defines row scopes.
 ///
-///     // Two adapters
-///     let fooAdapter = ColumnMapping(["value": "foo"])
-///     let barAdapter = ColumnMapping(["value": "bar"])
+/// `ScopeAdapter` does not change the columns and values of the fetched
+/// row. Instead, it defines *scopes* based on other adapter, which you
+/// access through the ``Row/scopes`` property of the fetched rows.
 ///
-///     // Define scopes
-///     let adapter = ScopeAdapter([
-///         "foo": fooAdapter,
-///         "bar": barAdapter])
+/// For example:
 ///
-///     // Fetch
-///     let sql = "SELECT 'foo' AS foo, 'bar' AS bar"
-///     let row = try Row.fetchOne(db, sql: sql, adapter: adapter)!
+/// ```swift
+/// let adapter = ScopeAdapter([
+///     "left": RangeRowAdapter(0..<2),
+///     "right": RangeRowAdapter(2..<4)])
+/// let sql = "SELECT 0 AS a, 1 AS b, 2 AS c, 3 AS d"
 ///
-///     // Scoped rows:
-///     if let fooRow = row.scopes["foo"] {
-///         fooRow["value"]    // "foo"
-///     }
-///     if let barRow = row.scopes["bar"] {
-///         barRow["value"]    // "bar"
-///     }
+/// let row = try Row.fetchOne(db, sql: sql, adapter: adapter)!
+///
+/// row                   // [a:0 b:1 c:2 d:3]
+/// row.scopes["left"]    // [a:0 b:1]
+/// row.scopes["right"]   // [c:2 d:3]
+/// row.scopes["missing"] // nil
+/// ```
+///
+/// Scopes can be nested:
+///
+/// ```swift
+/// let adapter = ScopeAdapter([
+///     "left": ScopeAdapter([
+///         "left": RangeRowAdapter(0..<1),
+///         "right": RangeRowAdapter(1..<2)]),
+///     "right": ScopeAdapter([
+///         "left": RangeRowAdapter(2..<3),
+///         "right": RangeRowAdapter(3..<4)])
+///     ])
+/// let sql = "SELECT 0 AS a, 1 AS b, 2 AS c, 3 AS d"
+/// let row = try Row.fetchOne(db, sql: sql, adapter: adapter)!
+///
+/// let leftRow = row.scopes["left"]!
+/// leftRow.scopes["left"]   // [a:0]
+/// leftRow.scopes["right"]  // [b:1]
+///
+/// let rightRow = row.scopes["right"]!
+/// rightRow.scopes["left"]  // [c:2]
+/// rightRow.scopes["right"] // [d:3]
+/// ```
+///
+/// Any adapter can be extended with scopes, with
+/// ``RowAdapter/addingScopes(_:)``:
+///
+/// ```swift
+/// let baseAdapter = RangeRowAdapter(0..<2)
+/// let adapter = baseAdapter.addingScopes([
+///     "remainder": SuffixRowAdapter(fromIndex: 2)
+/// ])
+/// let sql = "SELECT 0 AS a, 1 AS b, 2 AS c, 3 AS d"
+/// let row = try Row.fetchOne(db, sql: sql, adapter: adapter)!
+///
+/// row                     // [a:0 b:1]
+/// row.scopes["remainder"] // [c:2 d:3]
+/// ```
 public struct ScopeAdapter: RowAdapter {
     
     /// The base adapter
@@ -370,7 +572,7 @@ public struct ScopeAdapter: RowAdapter {
     ///
     /// - parameter scopes: A dictionary that maps scope names to
     ///   row adapters.
-    public init(_ scopes: [String: RowAdapter]) {
+    public init(_ scopes: [String: any RowAdapter]) {
         // Use SuffixRowAdapter(fromIndex: 0) as the identity adapter
         self.init(base: SuffixRowAdapter(fromIndex: 0), scopes: scopes)
     }
@@ -399,7 +601,6 @@ public struct ScopeAdapter: RowAdapter {
         self.scopes = scopes
     }
     
-    /// :nodoc:
     public func _layoutedAdapter(from layout: some _RowLayout) throws -> any _LayoutedRowAdapter {
         let layoutedAdapter = try base._layoutedAdapter(from: layout)
         var layoutedScopes = layoutedAdapter._scopes
@@ -431,11 +632,29 @@ struct ChainedAdapter: RowAdapter {
 ///
 /// For example:
 ///
-///     let adapter = RenameColumnAdapter { $0 + "rrr" }
-///     let sql = "SELECT 'foo' AS foo, 'bar' AS bar, 'baz' AS baz"
+/// ```swift
+/// let adapter = RenameColumnAdapter { column in column + "rrr" }
+/// let sql = "SELECT 0 AS a, 1 AS b, 2 AS c"
 ///
-///     // [foorrr:"foo", barrrr:"bar", bazrrr:"baz"]
-///     try Row.fetchOne(db, sql: sql, adapter: adapter)
+/// // [arrr:0, brrr:1, crrr:2]
+/// let row = try Row.fetchOne(db, sql: sql, adapter: adapter)!
+/// ```
+///
+/// This adapter is useful when subqueries contain duplicated column names:
+///
+/// ```swift
+/// let sql = "SELECT * FROM (SELECT 1 AS id, 2 AS id)"
+///
+/// // Prints ["id", "id:1"]
+/// // Note the "id:1" column, generated by SQLite.
+/// let row = try Row.fetchOne(db, sql: sql)!
+/// print(Array(row.columnNames))
+///
+/// // Drop the `:...` suffix, and prints ["id", "id"]
+/// let adapter = RenameColumnAdapter { String($0.prefix(while: { $0 != ":" })) }
+/// let adaptedRow = try Row.fetchOne(db, sql: sql, adapter: adapter)!
+/// print(Array(adaptedRow.columnNames))
+/// ```
 public struct RenameColumnAdapter: RowAdapter {
     let transform: (String) -> String
     
@@ -445,7 +664,6 @@ public struct RenameColumnAdapter: RowAdapter {
         self.transform = transform
     }
     
-    /// :nodoc:
     public func _layoutedAdapter(from layout: some _RowLayout) throws -> any _LayoutedRowAdapter {
         let layoutColumns = layout._layoutColumns.map { (index, column) in (index, transform(column)) }
         return _LayoutedColumnMapping(layoutColumns: layoutColumns)
@@ -505,14 +723,9 @@ struct AdaptedRowImpl: RowImpl {
         return try Value.fastDecode(fromRow: base, atUncheckedIndex: mappedIndex)
     }
     
-    func fastDecodeDataNoCopy(atUncheckedIndex index: Int) throws -> Data {
+    func withUnsafeData<T>(atUncheckedIndex index: Int, _ body: (Data?) throws -> T) throws -> T {
         let mappedIndex = mapping.baseColumnIndex(atMappingIndex: index)
-        return try base.impl.fastDecodeDataNoCopy(atUncheckedIndex: mappedIndex)
-    }
-    
-    func fastDecodeDataNoCopyIfPresent(atUncheckedIndex index: Int) throws -> Data? {
-        let mappedIndex = mapping.baseColumnIndex(atMappingIndex: index)
-        return try base.impl.fastDecodeDataNoCopyIfPresent(atUncheckedIndex: mappedIndex)
+        return try base.impl.withUnsafeData(atUncheckedIndex: mappedIndex, body)
     }
     
     func columnName(atUncheckedIndex index: Int) -> String {

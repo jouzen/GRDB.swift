@@ -35,7 +35,7 @@ class DatabaseMigratorTests : GRDBTestCase {
     }
     
     func testEmptyMigratorPublisher() throws {
-        guard #available(OSX 10.15, iOS 13, tvOS 13, watchOS 6, *) else {
+        guard #available(iOS 13, macOS 10.15, tvOS 13, watchOS 6, *) else {
             throw XCTSkip("Combine is not available")
         }
         
@@ -147,7 +147,7 @@ class DatabaseMigratorTests : GRDBTestCase {
     }
     
     func testNonEmptyMigratorPublisher() throws {
-        guard #available(OSX 10.15, iOS 13, tvOS 13, watchOS 6, *) else {
+        guard #available(iOS 13, macOS 10.15, tvOS 13, watchOS 6, *) else {
             throw XCTSkip("Combine is not available")
         }
         
@@ -203,7 +203,7 @@ class DatabaseMigratorTests : GRDBTestCase {
     }
 
     func testEmptyMigratorPublisherIsAsynchronous() throws {
-        guard #available(OSX 10.15, iOS 13, tvOS 13, watchOS 6, *) else {
+        guard #available(iOS 13, macOS 10.15, tvOS 13, watchOS 6, *) else {
             throw XCTSkip("Combine is not available")
         }
         
@@ -229,7 +229,7 @@ class DatabaseMigratorTests : GRDBTestCase {
     }
     
     func testNonEmptyMigratorPublisherIsAsynchronous() throws {
-        guard #available(OSX 10.15, iOS 13, tvOS 13, watchOS 6, *) else {
+        guard #available(iOS 13, macOS 10.15, tvOS 13, watchOS 6, *) else {
             throw XCTSkip("Combine is not available")
         }
         
@@ -256,7 +256,7 @@ class DatabaseMigratorTests : GRDBTestCase {
     }
     
     func testMigratorPublisherDefaultScheduler() throws {
-        guard #available(OSX 10.15, iOS 13, tvOS 13, watchOS 6, *) else {
+        guard #available(iOS 13, macOS 10.15, tvOS 13, watchOS 6, *) else {
             throw XCTSkip("Combine is not available")
         }
         
@@ -285,7 +285,7 @@ class DatabaseMigratorTests : GRDBTestCase {
     }
     
     func testMigratorPublisherCustomScheduler() throws {
-        guard #available(OSX 10.15, iOS 13, tvOS 13, watchOS 6, *) else {
+        guard #available(iOS 13, macOS 10.15, tvOS 13, watchOS 6, *) else {
             throw XCTSkip("Combine is not available")
         }
         
@@ -813,6 +813,31 @@ class DatabaseMigratorTests : GRDBTestCase {
         try migrator.migrate(dbQueue)
         try XCTAssertEqual(dbQueue.read { try Int.fetchOne($0, sql: "SELECT id FROM t1") }, 1)
         try XCTAssertTrue(dbQueue.read { try $0.tableExists("t2") })
+    }
+    
+    // Regression test for <https://github.com/groue/GRDB.swift/issues/1360>
+    func testEraseDatabaseOnSchemaChangeIgnoresInternalSchemaObjects() throws {
+        // Given a migrator with eraseDatabaseOnSchemaChange
+        var migrator = DatabaseMigrator()
+        migrator.eraseDatabaseOnSchemaChange = true
+        migrator.registerMigration("1") { db in
+            try db.execute(sql: "CREATE TABLE t(id INTEGER PRIMARY KEY)")
+        }
+        let dbQueue = try makeDatabaseQueue()
+        try migrator.migrate(dbQueue)
+        
+        // When we add an internal schema object (sqlite_stat1)
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT INTO t DEFAULT VALUES;
+                ANALYZE;
+                """)
+            try XCTAssertTrue(db.tableExists("sqlite_stat1"))
+        }
+        
+        // Then 2nd migration does not erase database
+        try migrator.migrate(dbQueue)
+        try XCTAssertEqual(dbQueue.read { try Int.fetchOne($0, sql: "SELECT id FROM t") }, 1)
     }
     
     func testEraseDatabaseOnSchemaChangeWithRenamedMigration() throws {

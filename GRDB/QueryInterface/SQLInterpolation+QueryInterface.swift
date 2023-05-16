@@ -1,4 +1,3 @@
-/// :nodoc:
 extension SQLInterpolation {
     
     // MARK: - TableRecord
@@ -18,6 +17,16 @@ extension SQLInterpolation {
     @_disfavoredOverload
     public mutating func appendInterpolation(_ table: any TableRecord.Type) {
         appendLiteral(table.databaseTableName.quotedDatabaseIdentifier)
+    }
+    
+    /// Appends the table name.
+    ///
+    ///     // SELECT * FROM player
+    ///     let playerTable = Table("player")
+    ///     let request: SQLRequest<Player> = "SELECT * FROM \(playerTable)"
+    @_disfavoredOverload
+    public mutating func appendInterpolation<T>(_ table: Table<T>) {
+        appendLiteral(table.tableName.quotedDatabaseIdentifier)
     }
     
     /// Appends the table name of the record.
@@ -75,7 +84,7 @@ extension SQLInterpolation {
     ///         """
     @_disfavoredOverload
     public mutating func appendInterpolation(_ selection: (any SQLSelectable)?) {
-        if let selection = selection {
+        if let selection {
             elements.append(.selection(selection.sqlSelection))
         } else {
             appendLiteral("NULL")
@@ -128,7 +137,7 @@ extension SQLInterpolation {
     ///         """
     @_disfavoredOverload
     public mutating func appendInterpolation(_ expressible: (any SQLExpressible)?) {
-        if let expressible = expressible {
+        if let expressible {
             elements.append(.expression(expressible.sqlExpression))
         } else {
             appendLiteral("NULL")
@@ -245,7 +254,6 @@ extension SQLInterpolation {
     
     // When a value is both an expression and a sequence of expressions,
     // favor the expression side. Use case: Foundation.Data interpolation.
-    /// :nodoc:
     public mutating func appendInterpolation<S>(_ expressible: S)
     where S: SQLExpressible, S: Sequence, S.Element: SQLExpressible
     {

@@ -16,12 +16,12 @@ private struct B : TableRecord {
 
 private struct RestrictedB : TableRecord {
     static let databaseTableName = "b"
-    static let databaseSelection: [SQLSelectable] = [Column("name")]
+    static let databaseSelection: [any SQLSelectable] = [Column("name")]
 }
 
 private struct ExtendedB : TableRecord {
     static let databaseTableName = "b"
-    static let databaseSelection: [SQLSelectable] = [AllColumns(), Column.rowID]
+    static let databaseSelection: [any SQLSelectable] = [AllColumns(), Column.rowID]
 }
 
 /// Test SQL generation
@@ -30,10 +30,10 @@ class AssociationHasOneSQLDerivationTests: GRDBTestCase {
     override func setup(_ dbWriter: some DatabaseWriter) throws {
         try dbWriter.write { db in
             try db.create(table: "a") { t in
-                t.column("id", .integer).primaryKey()
+                t.primaryKey("id", .integer)
             }
             try db.create(table: "b") { t in
-                t.column("id", .integer).primaryKey()
+                t.primaryKey("id", .integer)
                 t.column("aid", .integer).references("a")
                 t.column("name", .text)
             }

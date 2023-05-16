@@ -1,4 +1,4 @@
-## https://github.com/github/gitignore/blob/master/Global/OSX.gitignore
+## https://github.com/github/gitignore/blob/master/Global/macOS.gitignore
 
 .DS_Store
 .AppleDouble
@@ -106,7 +106,6 @@ Podfile.lock
 
 # SPM
 .build
-.swiftpm/
 GRDB.xcworkspace/xcshareddata/swiftpm
 #Package.resolved
 Tests/SPM/Packages

@@ -130,7 +130,7 @@ let request = Book.including(optional: Book.author)
 let bookInfos = BookInfo.fetchAll(db, request)
 ```
 
-Before we dive in, please remember that associations can not generate all possible SQL queries that involve several tables. You may also *prefer* writing SQL, and this is just OK, because your SQL skills are welcome: see the [Joined Queries Support](../README.md#joined-queries-support) chapter.
+Before we dive in, please remember that associations can not generate all possible SQL queries that involve several tables. You may also *prefer* writing SQL, and this is just OK, because your SQL skills are welcome. The [`splittingRowAdapters(columnCounts:)`](https://swiftpackageindex.com/groue/grdb.swift/documentation/grdb/splittingrowadapters(columncounts:)) method can help you consume the rows fetched from joined queries, as in `SELECT book.*, author.* FROM ...`.
 
 
 ## Required Protocols
@@ -511,7 +511,7 @@ When using class names composed of two or more words, the table name should use 
 | Mouse      | mouse      | `mouse`, `mice`, `maxMouseSize` |
 | Person     | person     | `person`, `people`, `personCount` |
 
-If your application relies on non-English names, GRDB may generate unexpected identifiers. If this happens, please [open an issue](http://github.com/groue/GRDB.swift/issues).
+If your application relies on non-English names, GRDB may generate unexpected identifiers. If this happens, please [open an issue](https://github.com/groue/GRDB.swift/issues).
 
 See [The Structure of a Joined Request] for more information.
 
@@ -649,7 +649,7 @@ Here is the recommended [migration] for the **[HasOne]** association:
 ```swift
 migrator.registerMigration("Countries") { db in
     try db.create(table: "country") { t in
-        t.column("code", .text).primaryKey()           // (1)
+        t.primaryKey("code", .text)                    // (1)
         t.column("name", .text)
     }
     try db.create(table: "demographics") { t in
@@ -2000,7 +2000,7 @@ Each association included in the request can feed a property of the decoded reco
 - [Decoding a Joined Request with a Decodable Record]
 - [Decoding a Joined Request with FetchableRecord]
 - [Debugging Request Decoding]
-- [Good Practices for Designing Record Types] - in this general guide about records, check out the "Compose Records" chapter.
+- [Recommended Practices for Designing Record Types] - in this general guide about records, check out the "Associations" chapter.
 
 
 ## The Structure of a Joined Request
@@ -2860,7 +2860,7 @@ extension DerivableRequest<Book> {
 }
 ```
 
-See [Good Practices for Designing Record Types] for more information.
+See [Recommended Practices for Designing Record Types] for more information.
 
 
 ## Known Issues
@@ -2907,8 +2907,6 @@ See [Good Practices for Designing Record Types] for more information.
             .including(required: Passport.citizen))
     ```
 
-Come [discuss](http://twitter.com/groue) for more information, or if you wish to help turning those missing features into reality.
-
 ---
 
 This documentation owns a lot to the [Active Record Associations](http://guides.rubyonrails.org/association_basics.html) guide, which is an immensely well-written introduction to database relations. Many thanks to the Rails team and contributors.
@@ -2919,7 +2917,7 @@ This documentation owns a lot to the [Active Record Associations](http://guides.
 
 **GRDB**
 
-Copyright (C) 2015-2020 Gwendal Roué
+Copyright (C) 2015-2023 Gwendal Roué
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
@@ -2963,7 +2961,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 [Further Refinements to Associations]: #further-refinements-to-associations
 [The Types of Associations]: #the-types-of-associations
 [FetchableRecord]: ../README.md#fetchablerecord-protocols
-[migration]: Migrations.md
+[migration]: https://swiftpackageindex.com/groue/grdb.swift/documentation/grdb/migrations
 [Record]: ../README.md#records
 [Foreign Key Actions]: https://sqlite.org/foreignkeys.html#fk_actions
 [Associations and the Database Schema]: #associations-and-the-database-schema
@@ -2998,18 +2996,17 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 [Isolation of Multiple Aggregates]: #isolation-of-multiple-aggregates
 [DerivableRequest Protocol]: #derivablerequest-protocol
 [Known Issues]: #known-issues
-[Row Adapters]: ../README.md#row-adapters
+[Row Adapters]: https://swiftpackageindex.com/groue/grdb.swift/documentation/grdb/rowadapter
 [query interface requests]: ../README.md#requests
 [TableRecord]: ../README.md#tablerecord-protocol
-[Good Practices for Designing Record Types]: GoodPracticesForDesigningRecordTypes.md
+[Recommended Practices for Designing Record Types]: https://swiftpackageindex.com/groue/grdb.swift/documentation/grdb/recordrecommendedpractices
 [regular aggregating methods]: ../README.md#fetching-aggregated-values
 [Record class]: ../README.md#record-class
 [EncodableRecord]: ../README.md#persistablerecord-protocol
 [PersistableRecord]: ../README.md#persistablerecord-protocol
 [Codable Records]: ../README.md#codable-records
 [persistence methods]: ../README.md#persistence-methods
-[database observation tools]: ../README.md#database-changes-observation
-[ValueObservation]: ../README.md#valueobservation
+[database observation tools]: https://swiftpackageindex.com/groue/grdb.swift/documentation/grdb/databaseobservation
 [FAQ]: ../README.md#faq-associations
 [common table expressions]: CommonTableExpressions.md
 [Common Table Expressions]: CommonTableExpressions.md

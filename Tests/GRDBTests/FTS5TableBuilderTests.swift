@@ -36,7 +36,7 @@ class FTS5TableBuilderTests: GRDBTestCase {
                 t.tokenizer = .ascii()
                 t.column("content")
             }
-            assertDidExecute(sql: "CREATE VIRTUAL TABLE \"documents\" USING fts5(content, tokenize='ascii')")
+            assertDidExecute(sql: "CREATE VIRTUAL TABLE \"documents\" USING fts5(content, tokenize='''ascii''')")
         }
     }
 
@@ -47,7 +47,7 @@ class FTS5TableBuilderTests: GRDBTestCase {
                 t.tokenizer = .ascii(separators: ["X"])
                 t.column("content")
             }
-            assertDidExecute(sql: "CREATE VIRTUAL TABLE \"documents\" USING fts5(content, tokenize='ascii separators ''X''')")
+            assertDidExecute(sql: "CREATE VIRTUAL TABLE \"documents\" USING fts5(content, tokenize='''ascii'' ''separators'' ''X''')")
         }
     }
 
@@ -58,7 +58,7 @@ class FTS5TableBuilderTests: GRDBTestCase {
                 t.tokenizer = .ascii(tokenCharacters: Set(".-"))
                 t.column("content")
             }
-            assertDidExecute(sql: "CREATE VIRTUAL TABLE \"documents\" USING fts5(content, tokenize='ascii tokenchars ''-.''')")
+            assertDidExecute(sql: "CREATE VIRTUAL TABLE \"documents\" USING fts5(content, tokenize='''ascii'' ''tokenchars'' ''-.''')")
         }
     }
 
@@ -69,7 +69,7 @@ class FTS5TableBuilderTests: GRDBTestCase {
                 t.tokenizer = .porter()
                 t.column("content")
             }
-            assertDidExecute(sql: "CREATE VIRTUAL TABLE \"documents\" USING fts5(content, tokenize='porter')")
+            assertDidExecute(sql: "CREATE VIRTUAL TABLE \"documents\" USING fts5(content, tokenize='''porter''')")
         }
     }
 
@@ -80,7 +80,7 @@ class FTS5TableBuilderTests: GRDBTestCase {
                 t.tokenizer = .porter(wrapping: .ascii())
                 t.column("content")
             }
-            assertDidExecute(sql: "CREATE VIRTUAL TABLE \"documents\" USING fts5(content, tokenize='porter ascii')")
+            assertDidExecute(sql: "CREATE VIRTUAL TABLE \"documents\" USING fts5(content, tokenize='''porter'' ''ascii''')")
         }
     }
 
@@ -91,7 +91,7 @@ class FTS5TableBuilderTests: GRDBTestCase {
                 t.tokenizer = .porter(wrapping: .unicode61())
                 t.column("content")
             }
-            assertDidExecute(sql: "CREATE VIRTUAL TABLE \"documents\" USING fts5(content, tokenize='porter unicode61')")
+            assertDidExecute(sql: "CREATE VIRTUAL TABLE \"documents\" USING fts5(content, tokenize='''porter'' ''unicode61''')")
         }
     }
 
@@ -102,7 +102,7 @@ class FTS5TableBuilderTests: GRDBTestCase {
                 t.tokenizer = .unicode61()
                 t.column("content")
             }
-            assertDidExecute(sql: "CREATE VIRTUAL TABLE \"documents\" USING fts5(content, tokenize='unicode61')")
+            assertDidExecute(sql: "CREATE VIRTUAL TABLE \"documents\" USING fts5(content, tokenize='''unicode61''')")
         }
     }
 
@@ -113,7 +113,7 @@ class FTS5TableBuilderTests: GRDBTestCase {
                 t.tokenizer = .unicode61(diacritics: .keep)
                 t.column("content")
             }
-            assertDidExecute(sql: "CREATE VIRTUAL TABLE \"documents\" USING fts5(content, tokenize='unicode61 remove_diacritics 0')")
+            assertDidExecute(sql: "CREATE VIRTUAL TABLE \"documents\" USING fts5(content, tokenize='''unicode61'' ''remove_diacritics'' ''0''')")
         }
     }
 
@@ -125,12 +125,12 @@ class FTS5TableBuilderTests: GRDBTestCase {
                 t.tokenizer = .unicode61(diacritics: .remove)
                 t.column("content")
             }
-            assertDidExecute(sql: "CREATE VIRTUAL TABLE \"documents\" USING fts5(content, tokenize='unicode61 remove_diacritics 2')")
+            assertDidExecute(sql: "CREATE VIRTUAL TABLE \"documents\" USING fts5(content, tokenize='''unicode61'' ''remove_diacritics'' ''2''')")
         }
     }
     #elseif !GRDBCIPHER
     func testUnicode61TokenizerDiacriticsRemove() throws {
-        guard #available(OSX 10.16, iOS 14, tvOS 14, watchOS 7, *) else {
+        guard #available(iOS 14, macOS 10.16, tvOS 14, watchOS 7, *) else {
             throw XCTSkip()
         }
         
@@ -140,7 +140,7 @@ class FTS5TableBuilderTests: GRDBTestCase {
                 t.tokenizer = .unicode61(diacritics: .remove)
                 t.column("content")
             }
-            assertDidExecute(sql: "CREATE VIRTUAL TABLE \"documents\" USING fts5(content, tokenize='unicode61 remove_diacritics 2')")
+            assertDidExecute(sql: "CREATE VIRTUAL TABLE \"documents\" USING fts5(content, tokenize='''unicode61'' ''remove_diacritics'' ''2''')")
         }
     }
     #endif
@@ -152,7 +152,7 @@ class FTS5TableBuilderTests: GRDBTestCase {
                 t.tokenizer = .unicode61(separators: ["X"])
                 t.column("content")
             }
-            assertDidExecute(sql: "CREATE VIRTUAL TABLE \"documents\" USING fts5(content, tokenize='unicode61 separators ''X''')")
+            assertDidExecute(sql: "CREATE VIRTUAL TABLE \"documents\" USING fts5(content, tokenize='''unicode61'' ''separators'' ''X''')")
         }
     }
 
@@ -163,7 +163,7 @@ class FTS5TableBuilderTests: GRDBTestCase {
                 t.tokenizer = .unicode61(tokenCharacters: Set(".-"))
                 t.column("content")
             }
-            assertDidExecute(sql: "CREATE VIRTUAL TABLE \"documents\" USING fts5(content, tokenize='unicode61 tokenchars ''-.''')")
+            assertDidExecute(sql: "CREATE VIRTUAL TABLE \"documents\" USING fts5(content, tokenize='''unicode61'' ''tokenchars'' ''-.''')")
         }
     }
 
@@ -222,7 +222,7 @@ class FTS5TableBuilderTests: GRDBTestCase {
         let dbQueue = try makeDatabaseQueue()
         try dbQueue.inDatabase { db in
             try db.create(table: "documents") { t in
-                t.column("id", .integer).primaryKey()
+                t.primaryKey("id", .integer)
                 t.column("content", .text)
             }
             try db.execute(sql: "INSERT INTO documents (content) VALUES (?)", arguments: ["foo"])
@@ -256,7 +256,7 @@ class FTS5TableBuilderTests: GRDBTestCase {
         let dbQueue = try makeDatabaseQueue()
         try dbQueue.writeWithoutTransaction { db in
             try db.create(table: "documents") { t in
-                t.column("id", .integer).primaryKey()
+                t.primaryKey("id", .integer)
                 t.column("content", .text)
             }
             assertDidExecute(sql: "CREATE TABLE \"documents\" (\"id\" INTEGER PRIMARY KEY, \"content\" TEXT)")
@@ -280,7 +280,7 @@ class FTS5TableBuilderTests: GRDBTestCase {
         let dbQueue = try makeDatabaseQueue()
         try dbQueue.inDatabase { db in
             try db.create(table: "documents") { t in
-                t.column("id", .integer).primaryKey()
+                t.primaryKey("id", .integer)
                 t.column("content", .text)
             }
             try db.execute(sql: "INSERT INTO documents (content) VALUES (?)", arguments: ["foo"])
@@ -309,7 +309,7 @@ class FTS5TableBuilderTests: GRDBTestCase {
         let dbQueue = try makeDatabaseQueue()
         try dbQueue.inDatabase { db in
             try db.create(table: "documents") { t in
-                t.column("id", .integer).primaryKey()
+                t.primaryKey("id", .integer)
                 t.column("content", .text)
             }
             try db.execute(sql: "INSERT INTO documents (content) VALUES (?)", arguments: ["foo"])

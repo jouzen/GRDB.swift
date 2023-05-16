@@ -1,9 +1,13 @@
 #if SQLITE_ENABLE_FTS5
-
-/// The protocol for custom FTS5 tokenizers.
+/// A type that implements a custom tokenizer for the ``FTS5`` full-text engine.
+///
+/// See [FTS5 Tokenizers](https://github.com/groue/GRDB.swift/blob/master/Documentation/FTS5Tokenizers.md)
+/// for more information.
 public protocol FTS5CustomTokenizer: FTS5Tokenizer {
-    /// The name of the tokenizer; should uniquely identify your custom
-    /// tokenizer.
+    /// The name of the tokenizer.
+    ///
+    /// The name should uniquely identify the tokenizer: don't use a built-in
+    /// name such as `ascii`, `porter` or `unicode61`.
     static var name: String { get }
     
     /// Creates a custom tokenizer.
@@ -27,7 +31,7 @@ extension FTS5CustomTokenizer {
     ///
     ///     class MyTokenizer : FTS5CustomTokenizer { ... }
     ///
-    ///     db.create(virtualTable: "book", using: FTS5()) { t in
+    ///     try db.create(virtualTable: "book", using: FTS5()) { t in
     ///         let tokenizer = MyTokenizer.tokenizerDescriptor(arguments: ["unicode61", "remove_diacritics", "0"])
     ///         t.tokenizer = tokenizer
     ///     }
@@ -57,7 +61,7 @@ extension Database {
     ///
     ///     class MyTokenizer : FTS5CustomTokenizer { ... }
     ///     db.add(tokenizer: MyTokenizer.self)
-    public func add<Tokenizer: FTS5CustomTokenizer>(tokenizer: Tokenizer.Type) {
+    public func add(tokenizer: (some FTS5CustomTokenizer).Type) {
         let api = FTS5.api(self)
         
         // Swift won't let the @convention(c) xCreate() function below create
@@ -72,7 +76,7 @@ extension Database {
                     return SQLITE_ERROR
                 }
                 do {
-                    let tokenizer = try Tokenizer(db: db, arguments: arguments)
+                    let tokenizer = try tokenizer.init(db: db, arguments: arguments)
                     
                     // Tokenizer must remain alive until xDeleteTokenizer()
                     // is called, as the xDelete member of xTokenizer
@@ -108,7 +112,7 @@ extension Database {
             }
             let constructor = Unmanaged<FTS5TokenizerConstructor>.fromOpaque(constructorPointer).takeUnretainedValue()
             var arguments: [String] = []
-            if let azArg = azArg {
+            if let azArg {
                 for i in 0..<Int(nArg) {
                     if let cstr = azArg[i] {
                         arguments.append(String(cString: cstr))
@@ -154,7 +158,7 @@ extension Database {
         let code = withUnsafeMutablePointer(to: &xTokenizer) { xTokenizerPointer in
             api.pointee.xCreateTokenizer(
                 UnsafeMutablePointer(mutating: api),
-                Tokenizer.name,
+                tokenizer.name,
                 constructorPointer,
                 xTokenizerPointer,
                 deleteConstructor)

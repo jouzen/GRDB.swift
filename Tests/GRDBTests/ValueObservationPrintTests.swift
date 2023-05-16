@@ -11,7 +11,7 @@ class ValueObservationPrintTests: GRDBTestCase {
     }
     
     /// Helps dealing with various SQLite versions
-    private func region(sql: String, in dbReader: DatabaseReader) throws -> String {
+    private func region(sql: String, in dbReader: some DatabaseReader) throws -> String {
         try dbReader.read { db in
             try db
                 .makeStatement(sql: sql)
@@ -54,6 +54,9 @@ class ValueObservationPrintTests: GRDBTestCase {
         try test(makeDatabaseQueue(filename: "test", configuration: config))
         try test(makeDatabasePool(filename: "test", configuration: config))
         try test(makeDatabasePool(filename: "test", configuration: config).makeSnapshot())
+#if SQLITE_ENABLE_SNAPSHOT || (!GRDBCUSTOMSQLITE && !GRDBCIPHER && (compiler(>=5.7.1) || !(os(macOS) || targetEnvironment(macCatalyst))))
+        try test(makeDatabasePool(filename: "test", configuration: config).makeSnapshotPool())
+#endif
     }
     
     func test_readonly_success_immediateScheduling() throws {
@@ -88,11 +91,17 @@ class ValueObservationPrintTests: GRDBTestCase {
         try test(makeDatabaseQueue(filename: "test", configuration: config))
         try test(makeDatabasePool(filename: "test", configuration: config))
         try test(makeDatabasePool(filename: "test", configuration: config).makeSnapshot())
+#if SQLITE_ENABLE_SNAPSHOT || (!GRDBCUSTOMSQLITE && !GRDBCIPHER && (compiler(>=5.7.1) || !(os(macOS) || targetEnvironment(macCatalyst))))
+        try test(makeDatabasePool(filename: "test", configuration: config).makeSnapshotPool())
+#endif
     }
     
     func test_readonly_failure_asynchronousScheduling() throws {
         struct TestError: Error { }
-        _ = try makeDatabasePool(filename: "test")
+        let dbPool = try makeDatabasePool(filename: "test")
+        // workaround Xcode 14.1 compiler (???) bug: database is not in the WAL
+        // mode unless the pool is used.
+        try dbPool.write { _ in }
         
         func test(_ dbReader: some DatabaseReader) throws {
             let logger = TestStream()
@@ -120,11 +129,17 @@ class ValueObservationPrintTests: GRDBTestCase {
         try test(makeDatabaseQueue(filename: "test", configuration: config))
         try test(makeDatabasePool(filename: "test", configuration: config))
         try test(makeDatabasePool(filename: "test", configuration: config).makeSnapshot())
+#if SQLITE_ENABLE_SNAPSHOT || (!GRDBCUSTOMSQLITE && !GRDBCIPHER && (compiler(>=5.7.1) || !(os(macOS) || targetEnvironment(macCatalyst))))
+        try test(makeDatabasePool(filename: "test", configuration: config).makeSnapshotPool())
+#endif
     }
     
     func test_readonly_failure_immediateScheduling() throws {
         struct TestError: Error { }
-        _ = try makeDatabasePool(filename: "test")
+        let dbPool = try makeDatabasePool(filename: "test")
+        // workaround Xcode 14.1 compiler (???) bug: database is not in the WAL
+        // mode unless the pool is used.
+        try dbPool.write { _ in }
         
         func test(_ dbReader: some DatabaseReader) throws {
             let logger = TestStream()
@@ -152,6 +167,9 @@ class ValueObservationPrintTests: GRDBTestCase {
         try test(makeDatabaseQueue(filename: "test", configuration: config))
         try test(makeDatabasePool(filename: "test", configuration: config))
         try test(makeDatabasePool(filename: "test", configuration: config).makeSnapshot())
+#if SQLITE_ENABLE_SNAPSHOT || (!GRDBCUSTOMSQLITE && !GRDBCIPHER && (compiler(>=5.7.1) || !(os(macOS) || targetEnvironment(macCatalyst))))
+        try test(makeDatabasePool(filename: "test", configuration: config).makeSnapshotPool())
+#endif
     }
     
     // MARK: - Writeonly
@@ -418,13 +436,17 @@ class ValueObservationPrintTests: GRDBTestCase {
             onChange: { _ in expectation.fulfill() })
         withExtendedLifetime(cancellable) {
             waitForExpectations(timeout: 1, handler: nil)
-            XCTAssertEqual(logger.strings, [
-                "start",
-                "fetch",
-                "value: nil",
+            // Order of events may not be stable, because the first
+            // "value: nil" is notified concurrently (from the reduce queue)
+            // with the first "database did change" (from the writer queue).
+            // That's why we test the sorted output.
+            XCTAssertEqual(logger.strings.sorted(), [
                 "database did change",
                 "fetch",
+                "fetch",
+                "start",
                 "tracked region: \(expectedRegion)",
+                "value: nil",
                 "value: nil"])
         }
     }

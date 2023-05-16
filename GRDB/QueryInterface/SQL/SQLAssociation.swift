@@ -49,8 +49,6 @@
 ///             through: Pivot1.hasMany(Pivot2.self),
 ///             via: Pivot2.belongsTo(Destination.self)))
 ///     Origin.including(required: association)
-///
-/// :nodoc:
 public struct _SQLAssociation {
     // All steps, from pivot to destination. Never empty.
     private(set) var steps: [SQLAssociationStep]
@@ -122,10 +120,10 @@ public struct _SQLAssociation {
         let reversedSteps = zip(steps, steps.dropFirst())
             .map { (step, nextStep) in
                 // Intermediate steps are not selected, and including(all:)
-                // children are useless:
+                // children can't impact the destination relation:
                 let relation = step.relation
                     .selectOnly([])
-                    .removingChildrenForPrefetchedAssociations()
+                    .removingPrefetchedAssociations()
                 
                 // Don't interfere with user-defined keys that could be added later
                 let key = step.key.with {

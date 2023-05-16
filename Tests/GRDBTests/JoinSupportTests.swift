@@ -50,7 +50,7 @@ private struct T2: Codable, FetchableRecord, TableRecord {
 
 private struct T3: Codable, FetchableRecord, TableRecord {
     static let databaseTableName = "t3"
-    static let databaseSelection: [SQLSelectable] = [Column("t1id"), Column("name")]
+    static let databaseSelection: [any SQLSelectable] = [Column("t1id"), Column("name")]
     var t1id: Int64
     var name: String
 }
@@ -92,7 +92,7 @@ private struct FlatModel: FetchableRecord {
         self.t5count = row.scopes[Scopes.suffix]!["t5count"]
     }
     
-    @available(iOS 13.0, macOS 10.15.0, tvOS 13.0, watchOS 6.0, *)
+    @available(iOS 13, macOS 10.15, tvOS 13, watchOS 6, *)
     static func modernAll() -> some FetchRequest<FlatModel> {
         all()
     }
@@ -138,7 +138,7 @@ private struct CodableFlatModel: FetchableRecord, Codable {
     var t3: T3?
     var t5count: Int
     
-    @available(iOS 13.0, macOS 10.15.0, tvOS 13.0, watchOS 6.0, *)
+    @available(iOS 13, macOS 10.15, tvOS 13, watchOS 6, *)
     static func modernAll() -> some FetchRequest<CodableFlatModel> {
         all()
     }
@@ -186,7 +186,7 @@ private struct CodableNestedModel: FetchableRecord, Codable {
     var t3: T3?
     var t5count: Int
     
-    @available(iOS 13.0, macOS 10.15.0, tvOS 13.0, watchOS 6.0, *)
+    @available(iOS 13, macOS 10.15, tvOS 13, watchOS 6, *)
     static func modernAll() -> some FetchRequest<CodableNestedModel> {
         all()
     }
@@ -216,26 +216,26 @@ class JoinSupportTests: GRDBTestCase {
     override func setup(_ dbWriter: some DatabaseWriter) throws {
         try dbWriter.write { db in
             try db.create(table: "t1") { t in
-                t.column("id", .integer).primaryKey()
+                t.primaryKey("id", .integer)
                 t.column("name", .text).notNull()
             }
             try db.create(table: "t2") { t in
-                t.column("id", .integer).primaryKey()
+                t.primaryKey("id", .integer)
                 t.column("t1id", .integer).notNull().references("t1", onDelete: .cascade)
                 t.column("name", .text).notNull()
                 t.uniqueKey(["t1id", "name"])
             }
             try db.create(table: "t3") { t in
-                t.column("t1id", .integer).primaryKey().references("t1", onDelete: .cascade)
+                t.primaryKey("t1id", .integer).references("t1", onDelete: .cascade)
                 t.column("name", .text).notNull()
                 t.column("ignored", .integer)
             }
             try db.create(table: "t4") { t in
-                t.column("t1id", .integer).primaryKey().references("t1", onDelete: .cascade)
+                t.primaryKey("t1id", .integer).references("t1", onDelete: .cascade)
                 t.column("name", .text).notNull()
             }
             try db.create(table: "t5") { t in
-                t.column("id", .integer).primaryKey()
+                t.primaryKey("id", .integer)
                 t.column("t3id", .integer).references("t3", onDelete: .cascade)
                 t.column("t4id", .integer).references("t4", onDelete: .cascade)
                 t.column("name", .text).notNull()

@@ -52,7 +52,7 @@ class UpdateStatementTests : GRDBTestCase {
         try dbQueue.inTransaction { db in
             
             let statement = try db.makeStatement(sql: "INSERT INTO persons (name, age) VALUES (?, ?)")
-            let persons: [[DatabaseValueConvertible?]] = [
+            let persons: [[(any DatabaseValueConvertible)?]] = [
                 ["Arthur", 41],
                 ["Barbara", nil],
                 ]
@@ -79,7 +79,7 @@ class UpdateStatementTests : GRDBTestCase {
         try dbQueue.inTransaction { db in
             
             let statement = try db.makeStatement(sql: "INSERT INTO persons (name, age) VALUES (?, ?)")
-            let persons: [[DatabaseValueConvertible?]] = [
+            let persons: [[(any DatabaseValueConvertible)?]] = [
                 ["Arthur", 41],
                 ["Barbara", nil],
                 ]
@@ -107,7 +107,7 @@ class UpdateStatementTests : GRDBTestCase {
         try dbQueue.inTransaction { db in
             
             let statement = try db.makeStatement(sql: "INSERT INTO persons (name, age) VALUES (:name, :age)")
-            let persons: [[String: DatabaseValueConvertible?]] = [
+            let persons: [[String: (any DatabaseValueConvertible)?]] = [
                 ["name": "Arthur", "age": 41],
                 ["name": "Barbara", "age": nil],
                 ]
@@ -134,7 +134,7 @@ class UpdateStatementTests : GRDBTestCase {
         try dbQueue.inTransaction { db in
             
             let statement = try db.makeStatement(sql: "INSERT INTO persons (name, age) VALUES (:name, :age)")
-            let persons: [[String: DatabaseValueConvertible?]] = [
+            let persons: [[String: (any DatabaseValueConvertible)?]] = [
                 ["name": "Arthur", "age": 41],
                 ["name": "Barbara", "age": nil],
                 ]
@@ -439,6 +439,157 @@ class UpdateStatementTests : GRDBTestCase {
                 """)
             let value = try Int.fetchOne(db, sql: "SELECT SUM(a) FROM t")
             XCTAssertEqual(value, 3)
+        }
+    }
+    
+    // MARK: - SQLITE_STATIC vs SQLITE_TRANSIENT
+    
+    func test_SQLITE_STATIC_then_SQLITE_TRANSIENT() throws {
+        let dbQueue = try makeDatabaseQueue()
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                CREATE TABLE t(a);
+                """)
+            
+            func test(value: some DatabaseValueConvertible) throws {
+                defer { try! db.execute(sql: "DELETE FROM t") }
+                
+                // Execute with temporary bindings (SQLITE_STATIC)
+                let statement = try db.makeStatement(sql: "INSERT INTO t VALUES (?)")
+                try statement.execute(arguments: [value])
+                
+                // Execute with non temporary bindings (SQLITE_TRANSIENT)
+                try statement.execute()
+                
+                // Since bindings are not temporary, they are not cleared,
+                // so insert the value again.
+                sqlite3_reset(statement.sqliteStatement)
+                sqlite3_step(statement.sqliteStatement)
+                sqlite3_reset(statement.sqliteStatement)
+                
+                // Test that we have inserted the value thrice.
+                try XCTAssertEqual(
+                    DatabaseValue.fetchSet(db, sql: "SELECT a FROM t"),
+                    [value.databaseValue])
+            }
+            
+            try test(value: "Foo")
+            try test(value: "")
+            try test(value: "Hello".data(using: .utf8)!)
+            try test(value: Data())
+            try test(value: 42)
+            try test(value: 1.23)
+        }
+    }
+    
+    func test_SQLITE_STATIC() throws {
+        let dbQueue = try makeDatabaseQueue()
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                CREATE TABLE t(a);
+                """)
+            
+            func test(value: some DatabaseValueConvertible) throws {
+                defer { try! db.execute(sql: "DELETE FROM t") }
+                
+                // Execute with temporary bindings (SQLITE_STATIC)
+                let statement = try db.makeStatement(sql: "INSERT INTO t VALUES (?)")
+                try statement.execute(arguments: [value])
+                
+                // Since bindings were temporary, and cleared, we now insert NULL
+                sqlite3_reset(statement.sqliteStatement)
+                sqlite3_step(statement.sqliteStatement)
+                sqlite3_reset(statement.sqliteStatement)
+                
+                // Test that we have inserted the value, and NULL
+                try XCTAssertEqual(
+                    DatabaseValue.fetchSet(db, sql: "SELECT a FROM t"),
+                    [value.databaseValue, .null])
+            }
+            
+            try test(value: "Foo")
+            try test(value: "")
+            try test(value: "Hello".data(using: .utf8)!)
+            try test(value: Data())
+            try test(value: 42)
+            try test(value: 1.23)
+        }
+    }
+    
+    func test_SQLITE_TRANSIENT_due_to_high_number_of_arguments() throws {
+        // SQLITE_STATIC optimization is disabled for more than 20 arguments.
+        let argumentCount = 21
+        
+        let dbQueue = try makeDatabaseQueue()
+        try dbQueue.write { db in
+            // "a0, a1, a2, ..."
+            let columns = (0..<argumentCount).map { "a\($0)" }.joined(separator: ",")
+            try db.execute(sql: """
+                CREATE TABLE t(\(columns));
+                """)
+            
+            func test(value: some DatabaseValueConvertible) throws {
+                defer { try! db.execute(sql: "DELETE FROM t") }
+                
+                // Execute with non temporary bindings (SQLITE_TRANSIENT),
+                // because there are more than 20 arguments
+                let statement = try db.makeStatement(sql: "INSERT INTO t VALUES (\(databaseQuestionMarks(count: argumentCount)))")
+                try statement.execute(arguments: StatementArguments(Array(repeating: value, count: argumentCount)))
+                
+                // Since bindings are not temporary, they are not cleared,
+                // so insert the value again.
+                sqlite3_reset(statement.sqliteStatement)
+                sqlite3_step(statement.sqliteStatement)
+                sqlite3_reset(statement.sqliteStatement)
+                
+                // Test that we have inserted the value twice.
+                try XCTAssertEqual(
+                    DatabaseValue.fetchSet(db, sql: "SELECT a0 FROM t"),
+                    [value.databaseValue])
+            }
+            
+            try test(value: "Foo")
+            try test(value: "")
+            try test(value: "Hello".data(using: .utf8)!)
+            try test(value: Data())
+            try test(value: 42)
+            try test(value: 1.23)
+        }
+    }
+    
+    func test_SQLITE_TRANSIENT() throws {
+        let dbQueue = try makeDatabaseQueue()
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                CREATE TABLE t(a);
+                """)
+            
+            func test(value: some DatabaseValueConvertible) throws {
+                defer { try! db.execute(sql: "DELETE FROM t") }
+                
+                // Execute with non temporary bindings (SQLITE_TRANSIENT)
+                let statement = try db.makeStatement(sql: "INSERT INTO t VALUES (?)")
+                try statement.setArguments([value])
+                try statement.execute()
+                
+                // Since bindings are not temporary, they are not cleared,
+                // so insert the value again.
+                sqlite3_reset(statement.sqliteStatement)
+                sqlite3_step(statement.sqliteStatement)
+                sqlite3_reset(statement.sqliteStatement)
+                
+                // Test that we have inserted the value twice.
+                try XCTAssertEqual(
+                    DatabaseValue.fetchSet(db, sql: "SELECT a FROM t"),
+                    [value.databaseValue])
+            }
+            
+            try test(value: "Foo")
+            try test(value: "")
+            try test(value: "Hello".data(using: .utf8)!)
+            try test(value: Data())
+            try test(value: 42)
+            try test(value: 1.23)
         }
     }
 }

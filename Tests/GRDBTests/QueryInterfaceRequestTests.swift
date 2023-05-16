@@ -136,6 +136,21 @@ class QueryInterfaceRequestTests: GRDBTestCase {
         }
     }
     
+    // Regression test for <https://github.com/groue/GRDB.swift/issues/1357>
+    func testIssue1357() throws {
+        let dbQueue = try makeDatabaseQueue()
+        try dbQueue.inDatabase { db in
+            let request = tableRequest
+                .annotated(with: Column("name").forKey("alt"))
+                .filter(Column("alt").detached)
+            
+            XCTAssertEqual(try request.fetchCount(db), 0)
+            XCTAssertEqual(lastSQLQuery, """
+                SELECT COUNT(*) FROM (SELECT *, "name" AS "alt" FROM "readers" WHERE "alt")
+                """)
+        }
+    }
+    
     
     // MARK: - Select
     
@@ -764,7 +779,7 @@ class QueryInterfaceRequestTests: GRDBTestCase {
             sql(dbQueue, tableRequest.order(Col.age.descNullsFirst)),
             "SELECT * FROM \"readers\" ORDER BY \"age\" DESC NULLS FIRST")
         #elseif !GRDBCIPHER
-        if #available(OSX 10.16, iOS 14, tvOS 14, watchOS 7, *) {
+        if #available(iOS 14, macOS 10.16, tvOS 14, watchOS 7, *) {
             XCTAssertEqual(
                 sql(dbQueue, tableRequest.order(Col.age.ascNullsLast)),
                 "SELECT * FROM \"readers\" ORDER BY \"age\" ASC NULLS LAST")
@@ -794,7 +809,7 @@ class QueryInterfaceRequestTests: GRDBTestCase {
             sql(dbQueue, tableRequest.order(Col.name.collating(.nocase).descNullsFirst)),
             "SELECT * FROM \"readers\" ORDER BY \"name\" COLLATE NOCASE DESC NULLS FIRST")
         #elseif !GRDBCIPHER
-        if #available(OSX 10.16, iOS 14, tvOS 14, watchOS 7, *) {
+        if #available(iOS 14, macOS 10.16, tvOS 14, watchOS 7, *) {
             XCTAssertEqual(
                 sql(dbQueue, tableRequest.order(Col.name.collating(.nocase).ascNullsLast)),
                 "SELECT * FROM \"readers\" ORDER BY \"name\" COLLATE NOCASE ASC NULLS LAST")
@@ -843,7 +858,7 @@ class QueryInterfaceRequestTests: GRDBTestCase {
             sql(dbQueue, tableRequest.order(Col.age.ascNullsLast).reversed()),
             "SELECT * FROM \"readers\" ORDER BY \"age\" DESC NULLS FIRST")
         #elseif !GRDBCIPHER
-        if #available(OSX 10.16, iOS 14, tvOS 14, watchOS 7, *) {
+        if #available(iOS 14, macOS 10.16, tvOS 14, watchOS 7, *) {
             XCTAssertEqual(
                 sql(dbQueue, tableRequest.order(Col.age.descNullsFirst).reversed()),
                 "SELECT * FROM \"readers\" ORDER BY \"age\" ASC NULLS LAST")
@@ -873,7 +888,7 @@ class QueryInterfaceRequestTests: GRDBTestCase {
             sql(dbQueue, tableRequest.order(Col.name.collating(.nocase).descNullsFirst).reversed()),
             "SELECT * FROM \"readers\" ORDER BY \"name\" COLLATE NOCASE ASC NULLS LAST")
         #elseif !GRDBCIPHER
-        if #available(OSX 10.16, iOS 14, tvOS 14, watchOS 7, *) {
+        if #available(iOS 14, macOS 10.16, tvOS 14, watchOS 7, *) {
             XCTAssertEqual(
                 sql(dbQueue, tableRequest.order(Col.name.collating(.nocase).ascNullsLast).reversed()),
                 "SELECT * FROM \"readers\" ORDER BY \"name\" COLLATE NOCASE DESC NULLS FIRST")

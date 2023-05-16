@@ -50,7 +50,7 @@ private struct RecordWithDate<Strategy: StrategyProvider>: EncodableRecord, Enco
     var date: Date
 }
 
-@available(OSX 10.15, iOS 13.0, tvOS 13.0, watchOS 6, *)
+@available(iOS 13, macOS 10.15, tvOS 13, watchOS 6, *)
 extension RecordWithDate: Identifiable {
     var id: Date { date }
 }
@@ -60,7 +60,7 @@ private struct RecordWithOptionalDate<Strategy: StrategyProvider>: EncodableReco
     var date: Date?
 }
 
-@available(OSX 10.15, iOS 13.0, tvOS 13.0, watchOS 6, *)
+@available(iOS 13, macOS 10.15, tvOS 13, watchOS 6, *)
 extension RecordWithOptionalDate: Identifiable {
     var id: Date? { date }
 }
@@ -87,7 +87,12 @@ class DatabaseDateEncodingStrategyTests: GRDBTestCase {
         }
     }
     
-    private func test<Strategy: StrategyProvider>(strategy: Strategy.Type, encodesDate date: Date, as value: DatabaseValueConvertible) throws {
+    private func test<Strategy: StrategyProvider>(
+        strategy: Strategy.Type,
+        encodesDate date: Date,
+        as value: some DatabaseValueConvertible)
+    throws
+    {
         try test(record: RecordWithDate<Strategy>(date: date), expectedStorage: value.databaseValue.storage)
         try test(record: RecordWithOptionalDate<Strategy>(date: date), expectedStorage: value.databaseValue.storage)
     }
@@ -222,7 +227,7 @@ extension DatabaseDateEncodingStrategyTests {
 extension DatabaseDateEncodingStrategyTests {
     func testFilterKey() throws {
         try makeDatabaseQueue().write { db in
-            try db.create(table: "t") { $0.column("id").primaryKey() }
+            try db.create(table: "t") { $0.primaryKey("id", .datetime) }
             
             do {
                 let request = Table<RecordWithDate<StrategyDeferredToDate>>("t").filter(key: testedDates[0])
@@ -255,12 +260,12 @@ extension DatabaseDateEncodingStrategyTests {
     }
     
     func testFilterID() throws {
-        guard #available(OSX 10.15, iOS 13.0, tvOS 13.0, watchOS 6, *) else {
+        guard #available(iOS 13, macOS 10.15, tvOS 13, watchOS 6, *) else {
             throw XCTSkip("Identifiable not available")
         }
         
         try makeDatabaseQueue().write { db in
-            try db.create(table: "t") { $0.column("id").primaryKey() }
+            try db.create(table: "t") { $0.primaryKey("id", .datetime) }
             
             do {
                 let request = Table<RecordWithDate<StrategyDeferredToDate>>("t").filter(id: testedDates[0])
@@ -335,12 +340,12 @@ extension DatabaseDateEncodingStrategyTests {
     }
     
     func testDeleteID() throws {
-        guard #available(OSX 10.15, iOS 13.0, tvOS 13.0, watchOS 6, *) else {
+        guard #available(iOS 13, macOS 10.15, tvOS 13, watchOS 6, *) else {
             throw XCTSkip("Identifiable not available")
         }
         
         try makeDatabaseQueue().write { db in
-            try db.create(table: "t") { $0.column("id").primaryKey() }
+            try db.create(table: "t") { $0.primaryKey("id", .datetime) }
             
             do {
                 try Table<RecordWithDate<StrategyDeferredToDate>>("t").deleteOne(db, id: testedDates[0])

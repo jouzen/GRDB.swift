@@ -530,11 +530,18 @@ extension SQLRelation {
         }
     }
     
-    func removingChildrenForPrefetchedAssociations() -> Self {
-        filteringChildren {
-            switch $0.kind {
-            case .all, .bridge: return false
-            case .oneRequired, .oneOptional: return true
+    /// Return a relation without any `.all` and `.bridge` children, recursively.
+    func removingPrefetchedAssociations() -> Self {
+        with {
+            $0.children = $0.children.compactMapValues { child in
+                switch child.kind {
+                case .all, .bridge:
+                    return nil
+                case .oneRequired, .oneOptional:
+                    return child.with {
+                        $0.relation = $0.relation.removingPrefetchedAssociations()
+                    }
+                }
             }
         }
     }
@@ -605,7 +612,12 @@ extension SQLRelation {
             guard !isDistinct else {
                 return try fetchTrivialCount(db)
             }
-    
+            
+            // <https://github.com/groue/GRDB.swift/issues/1357>
+            guard selection.allSatisfy(\.isTriviallyCountable) else {
+                return try fetchTrivialCount(db)
+            }
+            
             // SELECT expr1, expr2, ... FROM tableName ...
             // ->
             // SELECT COUNT(*) FROM tableName ...
@@ -628,7 +640,7 @@ struct SQLLimit {
     let offset: Int?
     
     var sql: String {
-        if let offset = offset {
+        if let offset {
             return "\(limit) OFFSET \(offset)"
         } else {
             return "\(limit)"

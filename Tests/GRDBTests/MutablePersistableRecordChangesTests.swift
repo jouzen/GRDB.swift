@@ -31,7 +31,7 @@ class MutablePersistableRecordChangesTests: GRDBTestCase {
     override func setup(_ dbWriter: some DatabaseWriter) throws {
         try dbWriter.write { db in
             try db.create(table: "players") { t in
-                t.column("id", .integer).primaryKey()
+                t.primaryKey("id", .integer)
                 t.column("name", .text)
                 t.column("score", .integer)
                 t.column("creationDate", .datetime)
@@ -559,6 +559,66 @@ class MutablePersistableRecordChangesTests: GRDBTestCase {
                     "UPDATE \"myRecord\" SET \"lastName\"=\'Johnson\', \"firstName\"=\'Bob\' WHERE \"id\"=1"]
                     .contains(lastSQLQuery))
             }
+        }
+    }
+    
+    func testDatabaseChangesWithClass() throws {
+        class Player: Encodable, EncodableRecord {
+            var id: Int64
+            var name: String
+            var score: Int
+            
+            init(id: Int64, name: String, score: Int) {
+                self.id = id
+                self.name = name
+                self.score = score
+            }
+        }
+        
+        var player = Player(id: 1, name: "Arthur", score: 1000)
+        do {
+            let changes = try player.databaseChanges { _ in }
+            XCTAssert(changes.isEmpty)
+        }
+        do {
+            let changes = try player.databaseChanges {
+                $0.name = "Barbara"
+            }
+            XCTAssertEqual(changes, ["name": "Arthur".databaseValue])
+        }
+        do {
+            let changes = try player.databaseChanges {
+                $0.name = "Craig"
+                $0.score = 200
+            }
+            XCTAssertEqual(changes, ["name": "Barbara".databaseValue, "score": 1000.databaseValue])
+        }
+    }
+    
+    func testDatabaseChangesWithStruct() throws {
+        struct Player: Encodable, EncodableRecord {
+            var id: Int64
+            var name: String
+            var score: Int
+        }
+        
+        var player = Player(id: 1, name: "Arthur", score: 1000)
+        do {
+            let changes = try player.databaseChanges { _ in }
+            XCTAssert(changes.isEmpty)
+        }
+        do {
+            let changes = try player.databaseChanges {
+                $0.name = "Barbara"
+            }
+            XCTAssertEqual(changes, ["name": "Arthur".databaseValue])
+        }
+        do {
+            let changes = try player.databaseChanges {
+                $0.name = "Craig"
+                $0.score = 200
+            }
+            XCTAssertEqual(changes, ["name": "Barbara".databaseValue, "score": 1000.databaseValue])
         }
     }
 }

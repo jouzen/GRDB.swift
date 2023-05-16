@@ -1,9 +1,8 @@
-/// DatabaseRegion defines a region in the database. DatabaseRegion is dedicated
-/// to help transaction observers recognize impactful database changes in their
-/// `observes(eventsOfKind:)` and `databaseDidChange(with:)` methods.
+/// An observable region of the database.
 ///
-/// A database region is the union of any number of "table regions", which can
-/// cover a full table, or the combination of columns and rows:
+/// A `DatabaseRegion` is the union of any number of "table regions", which can
+/// cover a full table, or the combination of columns and rows identified by
+/// their rowids:
 ///
 ///     |Table1 |   |Table2 |   |Table3 |   |Table4 |   |Table5 |
 ///     |-------|   |-------|   |-------|   |-------|   |-------|
@@ -12,24 +11,36 @@
 ///     |x|x|x|x|   |x| | | |   | | | | |   |x|x| |x|   | | | | |
 ///     |x|x|x|x|   |x| | | |   | | | | |   | | | | |   | | | | |
 ///
-/// To create a database region, you use one of those methods:
+/// It is dedicated to help ``TransactionObserver`` types detect impactful
+/// database changes.
 ///
-/// - `DatabaseRegion.fullDatabase`: the region that covers all database tables.
+/// You get `DatabaseRegion` instances from a ``DatabaseRegionConvertible``
+/// value, a prepared ``Statement``, or from the initializers described below.
 ///
-/// - `DatabaseRegion()`: the empty region.
+/// ## Topics
 ///
-/// - `DatabaseRegion(table:)`: the region that covers one database table.
+/// ### Creating Regions
 ///
-/// - `Statement.databaseRegion`:
+/// - ``fullDatabase-3ir3p``
+/// - ``init()``
 ///
-///         let statement = try db.makeStatement(sql: "SELECT name, score FROM player")
-///         let region = statement.databaseRegion
+/// ### Instance Properties
 ///
-/// - `FetchRequest.databaseRegion(_:)`
+/// - ``isEmpty``
+/// - ``isFullDatabase``
 ///
-///         let request = Player.filter(key: 1)
-///         let region = try request.databaseRegion(db)
-public struct DatabaseRegion: CustomStringConvertible, Equatable {
+/// ### Combining Regions
+///
+/// - ``formUnion(_:)``
+/// - ``union(_:)``
+///
+/// ### Detecting Database Changes
+///
+/// Use those methods from ``TransactionObserver`` methods.
+///
+/// - ``isModified(byEventsOfKind:)``
+/// - ``isModified(by:)``
+public struct DatabaseRegion {
     private let tableRegions: [CaseInsensitiveIdentifier: TableRegion]?
     
     private init(tableRegions: [CaseInsensitiveIdentifier: TableRegion]?) {
@@ -45,17 +56,15 @@ public struct DatabaseRegion: CustomStringConvertible, Equatable {
         return tableRegions.isEmpty
     }
     
-    /// Returns whether the region covers the full database: all columns and all
-    /// rows from all tables.
+    /// Returns whether the region covers the full database.
     public var isFullDatabase: Bool {
         tableRegions == nil
     }
     
-    /// The region that covers the full database: all columns and all rows
-    /// from all tables.
+    /// The region that covers the full database.
     public static let fullDatabase = DatabaseRegion(tableRegions: nil)
     
-    /// Creates an empty database region.
+    /// The empty database region.
     public init() {
         self.init(tableRegions: [:])
     }
@@ -226,9 +235,7 @@ extension DatabaseRegion {
     }
 }
 
-// Equatable
-extension DatabaseRegion {
-    /// :nodoc:
+extension DatabaseRegion: Equatable {
     public static func == (lhs: DatabaseRegion, rhs: DatabaseRegion) -> Bool {
         switch (lhs.tableRegions, rhs.tableRegions) {
         case (nil, nil):
@@ -249,9 +256,7 @@ extension DatabaseRegion {
     }
 }
 
-// CustomStringConvertible
-extension DatabaseRegion {
-    /// :nodoc:
+extension DatabaseRegion: CustomStringConvertible {
     public var description: String {
         guard let tableRegions else {
             return "full database"
@@ -282,8 +287,8 @@ private struct TableRegion: Equatable {
     var rowIds: Set<Int64>? // nil means "all rowids"
     
     var isEmpty: Bool {
-        if let columns = columns, columns.isEmpty { return true }
-        if let rowIds = rowIds, rowIds.isEmpty { return true }
+        if let columns, columns.isEmpty { return true }
+        if let rowIds, rowIds.isEmpty { return true }
         return false
     }
     
@@ -337,10 +342,42 @@ private struct TableRegion: Equatable {
 
 // MARK: - DatabaseRegionConvertible
 
-/// `DatabaseRegionConvertible` is the protocol for values that can be turned
-/// into a `DatabaseRegion`.
+/// A type that operates on a specific ``DatabaseRegion``.
 ///
-/// Such values specify the region observed by `DatabaseRegionObservation`.
+/// A `DatabaseRegionConvertible` instance feeds database observation tools such
+/// as ``DatabaseRegionObservation`` and ``ValueObservation``:
+///
+/// ```swift
+/// // An observation triggered by all changes to the database
+/// DatabaseRegionObservation(tracking: .fullDatabase)
+///
+/// // An observation triggered by all changes to the 'player' table
+/// DatabaseRegionObservation(tracking: Table("player"))
+///
+/// // An observation triggered by all changes to the row
+/// // with rowid 1 in the 'player' table
+/// DatabaseRegionObservation(tracking: Player.filter(id: 1))
+///
+/// // An observation triggered by all changes to the 'score' column
+/// // of the 'player' table
+/// DatabaseRegionObservation(tracking: SQLRequest("SELECT score FROM player"))
+/// ```
+///
+/// Specifying a region from a ``FetchRequest`` does not execute the request.
+/// In the above example, `Player.filter(id: 1)` and `SELECT score FROM player`
+/// are only compiled by SQLite, so that GRDB can understand the tables, rows,
+/// and columns that constitute the database region.
+///
+/// ## Topics
+///
+/// ### Creating a DatabaseRegion
+///
+/// - ``fullDatabase``
+/// - ``databaseRegion(_:)``
+///
+/// ### Supporting Types
+///
+///  - ``AnyDatabaseRegionConvertible``
 public protocol DatabaseRegionConvertible {
     /// Returns a database region.
     ///
@@ -355,7 +392,6 @@ extension DatabaseRegionConvertible where Self == DatabaseRegion {
 }
 
 extension DatabaseRegion: DatabaseRegionConvertible {
-    /// :nodoc:
     public func databaseRegion(_ db: Database) throws -> DatabaseRegion {
         self
     }
@@ -373,7 +409,6 @@ public struct AnyDatabaseRegionConvertible: DatabaseRegionConvertible {
         _region = region.databaseRegion
     }
     
-    /// :nodoc:
     public func databaseRegion(_ db: Database) throws -> DatabaseRegion {
         try _region(db)
     }

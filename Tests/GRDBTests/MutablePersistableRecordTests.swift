@@ -349,6 +349,49 @@ class MutablePersistableRecordTests: GRDBTestCase {
         }
     }
     
+    func testUpdateWithoutExplicitPrimaryKeyButWithExplicitRowIDSupport() throws {
+        let dbQueue = try makeDatabaseQueue()
+        try dbQueue.write { db in
+            try db.execute(sql: "CREATE TABLE record(name)")
+            
+            struct Record: Codable, MutablePersistableRecord {
+                var rowID: Int64?
+                var name: String
+                mutating func didInsert(_ inserted: InsertionSuccess) {
+                    rowID = inserted.rowID
+                }
+            }
+            
+            var record1 = Record(name: "Arthur")
+            var record2 = Record(name: "Barbara")
+            try record1.insert(db)
+            try record2.insert(db)
+            record1.name = "Craig"
+            try record1.update(db)
+            
+            let names = try String.fetchAll(db, sql: "SELECT name FROM record ORDER BY rowid")
+            XCTAssertEqual(names, ["Craig", "Barbara"])
+        }
+    }
+    
+    func testUpdateWithoutExplicitPrimaryKeyAndWithoutExplicitRowIDSupport() throws {
+        let dbQueue = try makeDatabaseQueue()
+        try dbQueue.write { db in
+            try db.execute(sql: "CREATE TABLE record(name)")
+            
+            struct Record: Codable, PersistableRecord {
+                var name: String
+            }
+            
+            let record = Record(name: "Arthur")
+            try record.insert(db)
+            do {
+                try record.update(db)
+                XCTFail("Expected RecordError")
+            } catch RecordError.recordNotFound { }
+        }
+    }
+    
     func testUpdateMutablePersistableRecordPerson() throws {
         let dbQueue = try makeDatabaseQueue()
         try dbQueue.inDatabase { db in
@@ -498,6 +541,48 @@ class MutablePersistableRecordTests: GRDBTestCase {
             XCTAssertEqual(rows[0]["name"] as String, "Craig")
             XCTAssertEqual(rows[1]["id"] as Int64, person2.id!)
             XCTAssertEqual(rows[1]["name"] as String, "Barbara")
+        }
+    }
+    
+    func testDeleteWithoutExplicitPrimaryKeyButWithExplicitRowIDSupport() throws {
+        let dbQueue = try makeDatabaseQueue()
+        try dbQueue.write { db in
+            try db.execute(sql: "CREATE TABLE record(name)")
+            
+            struct Record: Codable, MutablePersistableRecord {
+                var rowID: Int64?
+                var name: String
+                mutating func didInsert(_ inserted: InsertionSuccess) {
+                    rowID = inserted.rowID
+                }
+            }
+            
+            var record1 = Record(name: "Arthur")
+            var record2 = Record(name: "Barbara")
+            try record1.insert(db)
+            try record2.insert(db)
+            try record1.delete(db)
+            
+            let names = try String.fetchAll(db, sql: "SELECT name FROM record ORDER BY rowid")
+            XCTAssertEqual(names, ["Barbara"])
+        }
+    }
+    
+    func testDeleteWithoutExplicitPrimaryKeyAndWithoutExplicitRowIDSupport() throws {
+        let dbQueue = try makeDatabaseQueue()
+        try dbQueue.write { db in
+            try db.execute(sql: "CREATE TABLE record(name)")
+            
+            struct Record: Codable, PersistableRecord {
+                var name: String
+            }
+            
+            let record = Record(name: "Arthur")
+            try record.insert(db)
+            try XCTAssertFalse(record.delete(db))
+            
+            let names = try String.fetchAll(db, sql: "SELECT name FROM record ORDER BY rowid")
+            XCTAssertEqual(names, ["Arthur"])
         }
     }
     
@@ -775,7 +860,7 @@ class MutablePersistableRecordTests: GRDBTestCase {
         }
     }
     
-    func testPersistenceErrorMutablePersistableRecordCustomizedCountry() throws {
+    func testRecordErrorMutablePersistableRecordCustomizedCountry() throws {
         let country = MutablePersistableRecordCustomizedCountry(
             rowID: nil,
             isoCode: "FR",
@@ -786,8 +871,8 @@ class MutablePersistableRecordTests: GRDBTestCase {
             try dbQueue.inDatabase { db in
                 try country.update(db)
             }
-            XCTFail("Expected PersistenceError")
-        } catch PersistenceError.recordNotFound(databaseTableName: "countries", key: ["isoCode": "FR".databaseValue]) { }
+            XCTFail("Expected RecordError")
+        } catch RecordError.recordNotFound(databaseTableName: "countries", key: ["isoCode": "FR".databaseValue]) { }
         
         XCTAssertEqual(country.callbacks.willInsertCount, 0)
         XCTAssertEqual(country.callbacks.aroundInsertEnterCount, 0)
@@ -1037,7 +1122,7 @@ class MutablePersistableRecordTests: GRDBTestCase {
         let dbQueue = try makeDatabaseQueue()
         try dbQueue.inDatabase { db in
             try db.create(table: "records") { t in
-                t.column("id", .integer).primaryKey()
+                t.primaryKey("id", .integer)
                 t.column("a", .text)
                 t.column("b", .text)
                 t.column("c", .integer).notNull().defaults(to: 123)
@@ -1072,7 +1157,7 @@ class MutablePersistableRecordTests: GRDBTestCase {
             // Expect database errors when missing columns must have a value
             try db.drop(table: "records")
             try db.create(table: "records") { t in
-                t.column("id", .integer).primaryKey()
+                t.primaryKey("id", .integer)
                 t.column("a", .text)
                 t.column("b", .text).notNull()
             }
@@ -1088,9 +1173,9 @@ class MutablePersistableRecordTests: GRDBTestCase {
         }
     }
     
-    func testPersistenceErrorRecordNotFoundDescription() {
+    func testRecordErrorRecordNotFoundDescription() {
         do {
-            let error = PersistenceError.recordNotFound(
+            let error = RecordError.recordNotFound(
                 databaseTableName: "place",
                 key: ["id": .null])
             XCTAssertEqual(
@@ -1098,7 +1183,7 @@ class MutablePersistableRecordTests: GRDBTestCase {
                 "Key not found in table place: [id:NULL]")
         }
         do {
-            let error = PersistenceError.recordNotFound(
+            let error = RecordError.recordNotFound(
                 databaseTableName: "user",
                 key: ["uuid": "E621E1F8-C36C-495A-93FC-0C247A3E6E5F".databaseValue])
             XCTAssertEqual(
@@ -1168,7 +1253,7 @@ extension MutablePersistableRecordTests {
             throw XCTSkip("RETURNING clause is not available")
         }
 #else
-        guard #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macOS 12.0, *) else {
+        guard #available(iOS 15, macOS 12, tvOS 15, watchOS 8, *) else {
             throw XCTSkip("RETURNING clause is not available")
         }
 #endif
@@ -1189,7 +1274,7 @@ extension MutablePersistableRecordTests {
             throw XCTSkip("RETURNING clause is not available")
         }
 #else
-        guard #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macOS 12.0, *) else {
+        guard #available(iOS 15, macOS 12, tvOS 15, watchOS 8, *) else {
             throw XCTSkip("RETURNING clause is not available")
         }
 #endif
@@ -1239,7 +1324,7 @@ extension MutablePersistableRecordTests {
             throw XCTSkip("RETURNING clause is not available")
         }
 #else
-        guard #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macOS 12.0, *) else {
+        guard #available(iOS 15, macOS 12, tvOS 15, watchOS 8, *) else {
             throw XCTSkip("RETURNING clause is not available")
         }
 #endif
@@ -1280,6 +1365,43 @@ extension MutablePersistableRecordTests {
                 XCTAssertEqual(partialPlayer.callbacks.aroundDeleteExitCount, 0)
                 XCTAssertEqual(partialPlayer.callbacks.didDeleteCount, 0)
             }
+
+            do {
+                // Test onConflict: .ignore
+                sqlQueries.removeAll()
+                var player = FullPlayer(id: 1, name: "Barbara", score: 100)
+                try XCTAssertTrue(player.exists(db))
+                let score = try player.insertAndFetch(db, onConflict: .ignore, selection: [Column("score")]) { (statement: Statement) in
+                    try Int.fetchOne(statement)
+                }
+                
+                XCTAssert(sqlQueries.contains("""
+                    INSERT OR IGNORE INTO "player" ("id", "name", "score") VALUES (1,'Barbara',100) RETURNING "score"
+                    """), sqlQueries.joined(separator: "\n"))
+                
+                XCTAssertEqual(player.id, 1)
+                XCTAssertNil(score)
+                
+                XCTAssertEqual(player.callbacks.willInsertCount, 1)
+                XCTAssertEqual(player.callbacks.aroundInsertEnterCount, 1)
+                XCTAssertEqual(player.callbacks.aroundInsertExitCount, 1)
+                XCTAssertEqual(player.callbacks.didInsertCount, 1)
+                
+                XCTAssertEqual(player.callbacks.willUpdateCount, 0)
+                XCTAssertEqual(player.callbacks.aroundUpdateEnterCount, 0)
+                XCTAssertEqual(player.callbacks.aroundUpdateExitCount, 0)
+                XCTAssertEqual(player.callbacks.didUpdateCount, 0)
+                
+                XCTAssertEqual(player.callbacks.willSaveCount, 1)
+                XCTAssertEqual(player.callbacks.aroundSaveEnterCount, 1)
+                XCTAssertEqual(player.callbacks.aroundSaveExitCount, 1)
+                XCTAssertEqual(player.callbacks.didSaveCount, 1)
+                
+                XCTAssertEqual(player.callbacks.willDeleteCount, 0)
+                XCTAssertEqual(player.callbacks.aroundDeleteEnterCount, 0)
+                XCTAssertEqual(player.callbacks.aroundDeleteExitCount, 0)
+                XCTAssertEqual(player.callbacks.didDeleteCount, 0)
+            }
         }
     }
 }
@@ -1293,7 +1415,7 @@ extension MutablePersistableRecordTests {
             throw XCTSkip("RETURNING clause is not available")
         }
 #else
-        guard #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macOS 12.0, *) else {
+        guard #available(iOS 15, macOS 12, tvOS 15, watchOS 8, *) else {
             throw XCTSkip("RETURNING clause is not available")
         }
 #endif
@@ -1314,7 +1436,7 @@ extension MutablePersistableRecordTests {
             throw XCTSkip("RETURNING clause is not available")
         }
 #else
-        guard #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macOS 12.0, *) else {
+        guard #available(iOS 15, macOS 12, tvOS 15, watchOS 8, *) else {
             throw XCTSkip("RETURNING clause is not available")
         }
 #endif
@@ -1440,7 +1562,7 @@ extension MutablePersistableRecordTests {
             throw XCTSkip("RETURNING clause is not available")
         }
 #else
-        guard #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macOS 12.0, *) else {
+        guard #available(iOS 15, macOS 12, tvOS 15, watchOS 8, *) else {
             throw XCTSkip("RETURNING clause is not available")
         }
 #endif
@@ -1570,7 +1692,7 @@ extension MutablePersistableRecordTests {
             throw XCTSkip("RETURNING clause is not available")
         }
 #else
-        guard #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macOS 12.0, *) else {
+        guard #available(iOS 15, macOS 12, tvOS 15, watchOS 8, *) else {
             throw XCTSkip("RETURNING clause is not available")
         }
 #endif
@@ -1580,8 +1702,8 @@ extension MutablePersistableRecordTests {
             var player = FullPlayer(id: 1, name: "Arthur", score: 1000)
             do {
                 _ = try player.updateAndFetch(db)
-                XCTFail("Expected PersistenceError")
-            } catch PersistenceError.recordNotFound(databaseTableName: "player", key: ["id": 1.databaseValue]) { }
+                XCTFail("Expected RecordError")
+            } catch RecordError.recordNotFound(databaseTableName: "player", key: ["id": 1.databaseValue]) { }
             
             try player.insert(db)
             player.name = "Barbara"
@@ -1621,7 +1743,7 @@ extension MutablePersistableRecordTests {
             throw XCTSkip("RETURNING clause is not available")
         }
 #else
-        guard #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macOS 12.0, *) else {
+        guard #available(iOS 15, macOS 12, tvOS 15, watchOS 8, *) else {
             throw XCTSkip("RETURNING clause is not available")
         }
 #endif
@@ -1631,8 +1753,8 @@ extension MutablePersistableRecordTests {
             var player = FullPlayer(id: 1, name: "Arthur", score: 1000)
             do {
                 _ = try player.updateAndFetch(db, as: PartialPlayer.self)
-                XCTFail("Expected PersistenceError")
-            } catch PersistenceError.recordNotFound(databaseTableName: "player", key: ["id": 1.databaseValue]) { }
+                XCTFail("Expected RecordError")
+            } catch RecordError.recordNotFound(databaseTableName: "player", key: ["id": 1.databaseValue]) { }
             
             try player.insert(db)
             player.name = "Barbara"
@@ -1671,7 +1793,7 @@ extension MutablePersistableRecordTests {
             throw XCTSkip("RETURNING clause is not available")
         }
 #else
-        guard #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macOS 12.0, *) else {
+        guard #available(iOS 15, macOS 12, tvOS 15, watchOS 8, *) else {
             throw XCTSkip("RETURNING clause is not available")
         }
 #endif
@@ -1683,8 +1805,8 @@ extension MutablePersistableRecordTests {
                 _ = try player.updateAndFetch(db, selection: [AllColumns()]) { statement in
                     try Row.fetchOne(statement)
                 }
-                XCTFail("Expected PersistenceError")
-            } catch PersistenceError.recordNotFound(databaseTableName: "player", key: ["id": 1.databaseValue]) { }
+                XCTFail("Expected RecordError")
+            } catch RecordError.recordNotFound(databaseTableName: "player", key: ["id": 1.databaseValue]) { }
             
             try player.insert(db)
             player.name = "Barbara"
@@ -1725,7 +1847,7 @@ extension MutablePersistableRecordTests {
             throw XCTSkip("RETURNING clause is not available")
         }
 #else
-        guard #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macOS 12.0, *) else {
+        guard #available(iOS 15, macOS 12, tvOS 15, watchOS 8, *) else {
             throw XCTSkip("RETURNING clause is not available")
         }
 #endif
@@ -1737,8 +1859,8 @@ extension MutablePersistableRecordTests {
                 _ = try player.updateAndFetch(db, columns: [Column("score")], selection: [AllColumns()]) { statement in
                     try Row.fetchOne(statement)
                 }
-                XCTFail("Expected PersistenceError")
-            } catch PersistenceError.recordNotFound(databaseTableName: "player", key: ["id": 1.databaseValue]) { }
+                XCTFail("Expected RecordError")
+            } catch RecordError.recordNotFound(databaseTableName: "player", key: ["id": 1.databaseValue]) { }
             
             try player.insert(db)
             player.name = "Barbara"
@@ -1779,7 +1901,7 @@ extension MutablePersistableRecordTests {
             throw XCTSkip("RETURNING clause is not available")
         }
 #else
-        guard #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macOS 12.0, *) else {
+        guard #available(iOS 15, macOS 12, tvOS 15, watchOS 8, *) else {
             throw XCTSkip("RETURNING clause is not available")
         }
 #endif
@@ -1791,8 +1913,8 @@ extension MutablePersistableRecordTests {
                 _ = try player.updateChangesAndFetch(db) {
                     $0.name = "Barbara"
                 }
-                XCTFail("Expected PersistenceError")
-            } catch PersistenceError.recordNotFound(databaseTableName: "player", key: ["id": 1.databaseValue]) { }
+                XCTFail("Expected RecordError")
+            } catch RecordError.recordNotFound(databaseTableName: "player", key: ["id": 1.databaseValue]) { }
             
             try player.insert(db)
             
@@ -1840,7 +1962,7 @@ extension MutablePersistableRecordTests {
             throw XCTSkip("RETURNING clause is not available")
         }
 #else
-        guard #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macOS 12.0, *) else {
+        guard #available(iOS 15, macOS 12, tvOS 15, watchOS 8, *) else {
             throw XCTSkip("RETURNING clause is not available")
         }
 #endif
@@ -1852,8 +1974,8 @@ extension MutablePersistableRecordTests {
                 _ = try player.updateChangesAndFetch(db, as: PartialPlayer.self) {
                     $0.name = "Barbara"
                 }
-                XCTFail("Expected PersistenceError")
-            } catch PersistenceError.recordNotFound(databaseTableName: "player", key: ["id": 1.databaseValue]) { }
+                XCTFail("Expected RecordError")
+            } catch RecordError.recordNotFound(databaseTableName: "player", key: ["id": 1.databaseValue]) { }
             
             try player.insert(db)
             
@@ -1900,7 +2022,7 @@ extension MutablePersistableRecordTests {
             throw XCTSkip("RETURNING clause is not available")
         }
 #else
-        guard #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macOS 12.0, *) else {
+        guard #available(iOS 15, macOS 12, tvOS 15, watchOS 8, *) else {
             throw XCTSkip("RETURNING clause is not available")
         }
 #endif
@@ -1913,8 +2035,8 @@ extension MutablePersistableRecordTests {
                     db, selection: [AllColumns()],
                     fetch: { statement in try Row.fetchOne(statement) },
                     modify: { $0.name = "Barbara" })
-                XCTFail("Expected PersistenceError")
-            } catch PersistenceError.recordNotFound(databaseTableName: "player", key: ["id": 1.databaseValue]) { }
+                XCTFail("Expected RecordError")
+            } catch RecordError.recordNotFound(databaseTableName: "player", key: ["id": 1.databaseValue]) { }
             
             try player.insert(db)
             
@@ -1966,7 +2088,7 @@ extension MutablePersistableRecordTests {
             throw XCTSkip("UPSERT is not available")
         }
 #else
-        guard #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macOS 12.0, *) else {
+        guard #available(iOS 15, macOS 12, tvOS 15, watchOS 8, *) else {
             throw XCTSkip("UPSERT is not available")
         }
 #endif
@@ -2115,7 +2237,7 @@ extension MutablePersistableRecordTests {
             throw XCTSkip("UPSERT is not available")
         }
 #else
-        guard #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macOS 12.0, *) else {
+        guard #available(iOS 15, macOS 12, tvOS 15, watchOS 8, *) else {
             throw XCTSkip("UPSERT is not available")
         }
 #endif
@@ -2271,7 +2393,7 @@ extension MutablePersistableRecordTests {
             throw XCTSkip("UPSERT is not available")
         }
 #else
-        guard #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macOS 12.0, *) else {
+        guard #available(iOS 15, macOS 12, tvOS 15, watchOS 8, *) else {
             throw XCTSkip("UPSERT is not available")
         }
 #endif
@@ -2374,7 +2496,7 @@ extension MutablePersistableRecordTests {
             throw XCTSkip("UPSERT is not available")
         }
 #else
-        guard #available(iOS 15.0, tvOS 15.0, watchOS 8.0, macOS 12.0, *) else {
+        guard #available(iOS 15, macOS 12, tvOS 15, watchOS 8, *) else {
             throw XCTSkip("UPSERT is not available")
         }
 #endif

@@ -1,6 +1,8 @@
 import Foundation
 
 extension EncodableRecord where Self: Encodable {
+    /// Encodes the record into the provided persistence container, using the
+    /// `Encodable` conformance.
     public func encode(to container: inout PersistenceContainer) throws {
         let encoder = RecordEncoder<Self>(persistenceContainer: container)
         try encode(to: encoder)
@@ -92,7 +94,7 @@ private class RecordEncoder<Record: EncodableRecord>: Encoder {
         // swiftlint:enable comma
         
         func encodeIfPresent<T>(_ value: T?, forKey key: Key) throws where T: Encodable {
-            if let value = value {
+            if let value {
                 try recordEncoder.encode(value, forKey: key)
             } else {
                 recordEncoder.persist(nil, forKey: key)

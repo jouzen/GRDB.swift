@@ -219,7 +219,7 @@ extension ValueObservationRecorder {
 extension ValueObservation {
     public func record(
         in reader: some DatabaseReader,
-        scheduling scheduler: ValueObservationScheduler = .async(onQueue: .main),
+        scheduling scheduler: some ValueObservationScheduler = .async(onQueue: .main),
         onError: ((Error) -> Void)? = nil,
         onChange: ((Reducer.Value) -> Void)? = nil)
     -> ValueObservationRecorder<Reducer.Value>
@@ -310,43 +310,43 @@ extension XCTestCase {
     /// - `[0, 1, 2]` (unexpected value)
     /// - `[1, 0, 1]` (unexpected value)
     func assertValueObservationRecordingMatch<R, E>(
-        recorded recordedValues: R,
-        expected expectedValues: E,
-        allowMissingLastValue: Bool = false,
+        recorded: R,
+        expected: E,
         _ message: @autoclosure () -> String = "",
         file: StaticString = #file,
         line: UInt = #line)
         where
-        R: BidirectionalCollection,
-        E: BidirectionalCollection,
+        R: Collection,
+        E: Collection,
         R.Element == E.Element,
         R.Element: Equatable
     {
-        guard let value = expectedValues.last else {
-            if !recordedValues.isEmpty {
-                XCTFail("unexpected recorded prefix \(Array(recordedValues)) - \(message())", file: file, line: line)
-            }
-            return
+        XCTAssertTrue(
+            valueObservationRecordingMatch(recorded: recorded, expected: expected),
+            "Unexpected recording \(Array(recorded)) - \(message())",
+            file: file, line: line)
+    }
+    
+    func valueObservationRecordingMatch<R, E>(
+        recorded: R,
+        expected: E)
+    -> Bool
+    where R: Collection,
+          E: Collection,
+          R.Element == E.Element,
+          R.Element: Equatable
+    {
+        guard let first = recorded.first else {
+            return expected.isEmpty
         }
         
-        let recordedSuffix = recordedValues.reversed().prefix(while: { $0 == value })
-        let expectedSuffix = expectedValues.reversed().prefix(while: { $0 == value })
-        if !allowMissingLastValue {
-            // Both missing and repeated values are allowed in the recorded values.
-            // This is because of asynchronous DatabasePool observations.
-            if recordedSuffix.isEmpty {
-                XCTFail("missing expected value \(value) - \(message()) in \(recordedValues)", file: file, line: line)
+        return expected.indices.lazy
+            .filter { expected[$0] == first }
+            .contains {
+                valueObservationRecordingMatch(
+                    recorded: recorded.drop(while: { $0 == first }),
+                    expected: expected[$0...].dropFirst())
             }
-        }
-        
-        let remainingRecordedValues = recordedValues.prefix(recordedValues.count - recordedSuffix.count)
-        let remainingExpectedValues = expectedValues.prefix(expectedValues.count - expectedSuffix.count)
-        assertValueObservationRecordingMatch(
-            recorded: remainingRecordedValues,
-            expected: remainingExpectedValues,
-            // Other values can be missed
-            allowMissingLastValue: true,
-            message(), file: file, line: line)
     }
 }
 
@@ -365,7 +365,7 @@ extension GRDBTestCase {
     {
         func test(
             observation: ValueObservation<Reducer>,
-            scheduling scheduler: ValueObservationScheduler,
+            scheduling scheduler: some ValueObservationScheduler,
             testValueDispatching: @escaping () -> Void) throws
         {
             func testRecordingEqualWhenWriteAfterStart(writer: some DatabaseWriter) throws {
@@ -567,7 +567,7 @@ extension GRDBTestCase {
     
     func assertValueObservation<Reducer: ValueReducer, Failure: Error>(
         _ observation: ValueObservation<Reducer>,
-        fails testFailure: (Failure, DatabaseWriter) throws -> Void,
+        fails testFailure: (Failure, any DatabaseWriter) throws -> Void,
         setup: (Database) throws -> Void,
         file: StaticString = #file,
         line: UInt = #line)
@@ -575,7 +575,7 @@ extension GRDBTestCase {
     {
         func test(
             observation: ValueObservation<Reducer>,
-            scheduling scheduler: ValueObservationScheduler,
+            scheduling scheduler: some ValueObservationScheduler,
             testErrorDispatching: @escaping () -> Void) throws
         {
             func test(writer: some DatabaseWriter) throws {
@@ -668,7 +668,7 @@ extension ValueObservationExpectations {
                     consume(1)
                     return next
                 }
-                if let error = error {
+                if let error {
                     throw error
                 } else {
                     throw ValueRecordingError.notEnoughValues
@@ -696,7 +696,7 @@ extension ValueObservationExpectations {
                 if remainingValues.isEmpty == false {
                     return
                 }
-                if let error = error {
+                if let error {
                     throw error
                 }
             }
@@ -732,7 +732,7 @@ extension ValueObservationExpectations {
                     consume(count)
                     return Array(remainingValues.prefix(count))
                 }
-                if let error = error {
+                if let error {
                     throw error
                 } else {
                     throw ValueRecordingError.notEnoughValues
@@ -783,7 +783,7 @@ extension ValueObservationExpectations {
                     consume(extraCount)
                     return Array(values.prefix(matchedCount))
                 }
-                if let error = error {
+                if let error {
                     throw error
                 }
                 consume(remainingValues.count)
@@ -807,7 +807,7 @@ extension ValueObservationExpectations {
         
         public func get() throws -> (values: [Value], error: Error) {
             try recorder.value { (values, error, remainingValues, consume) in
-                if let error = error {
+                if let error {
                     consume(remainingValues.count)
                     return (values: values, error: error)
                 } else {

@@ -18,13 +18,13 @@ import Foundation
 /// reducing stage.
 ///
 /// **Notify** is calling user callbacks, in case of database change or error.
-final class ValueConcurrentObserver<Reducer: ValueReducer> {
+final class ValueConcurrentObserver<Reducer: ValueReducer, Scheduler: ValueObservationScheduler> {
     // MARK: - Configuration
     //
     // Configuration is not mutable.
     
     /// How to schedule observed values and errors.
-    private let scheduler: ValueObservationScheduler
+    private let scheduler: Scheduler
     
     /// Configures the tracked database region.
     private let trackingMode: ValueObservationTrackingMode
@@ -101,6 +101,19 @@ final class ValueConcurrentObserver<Reducer: ValueReducer> {
         }
     }
     
+    /// The fetching state for observation of constant regions.
+    enum FetchingState {
+        /// No need to fetch.
+        case idle
+        
+        /// Waiting for a fetched value.
+        case fetching
+        
+        /// Waiting for a fetched value, and for a subsequent  fetch after
+        /// that, because a change has been detected as we were fetching.
+        case fetchingAndNeedsFetch
+    }
+    
     /// Ability to notify observation events
     private struct NotificationCallbacks {
         let events: ValueObservationEvents
@@ -132,6 +145,9 @@ final class ValueConcurrentObserver<Reducer: ValueReducer> {
     /// Ability to notify observation events, protected by `lock`.
     private var notificationCallbacks: NotificationCallbacks?
     
+    /// The fetching state for observation of constant regions.
+    @LockedBox private var fetchingState = FetchingState.idle
+    
     /// Support for `TransactionObserver`, protected by the serialized writer
     /// dispatch queue.
     private var observationState = ObservationState.notObserving
@@ -141,7 +157,7 @@ final class ValueConcurrentObserver<Reducer: ValueReducer> {
     
     init(
         dbPool: DatabasePool,
-        scheduler: ValueObservationScheduler,
+        scheduler: Scheduler,
         trackingMode: ValueObservationTrackingMode,
         reducer: Reducer,
         events: ValueObservationEvents,
@@ -257,8 +273,8 @@ extension ValueConcurrentObserver {
     }
 }
 
-// MARK: - Starting the Observation (with SQLITE_ENABLE_SNAPSHOT)
-
+// swiftlint:disable:next line_length
+#if SQLITE_ENABLE_SNAPSHOT || (!GRDBCUSTOMSQLITE && !GRDBCIPHER && (compiler(>=5.7.1) || !(os(macOS) || targetEnvironment(macCatalyst))))
 extension ValueConcurrentObserver {
     /// Synchronously starts the observation, and returns the initial value.
     ///
@@ -269,29 +285,22 @@ extension ValueConcurrentObserver {
         // without having to wait for an eventual long-running write
         // transaction to complete.
         //
-        // Fetch value & tracked region in a synchronous way.
-        //
-        // TODO: we currently perform the initial read from a snapshot, because
-        // it is a handy way to keep a read transaction open until we grab a
-        // write access, and compare the database versions. The problem is that
-        // we do not control the number of created shapshots: we should instead
-        // use a reader from the pool.
-        let initialSnapshot = try databaseAccess.dbPool.makeSnapshot()
-        let (fetchedValue, initialRegion, initialWALSnapshot) = try initialSnapshot.read {
-            db -> (Reducer.Fetched, DatabaseRegion, WALSnapshot?) in
-            // swiftlint:disable:previous closure_parameter_position
-            
+        // We perform the initial read from a long-lived WAL snapshot
+        // transaction, because it is a handy way to keep a read transaction
+        // open until we grab a write access, and compare the database versions.
+        let initialFetchTransaction = try databaseAccess.dbPool.walSnapshotTransaction()
+        let (fetchedValue, initialRegion): (Reducer.Fetched, DatabaseRegion) = try initialFetchTransaction.read { db in
             switch trackingMode {
             case let .constantRegion(regions):
                 let fetchedValue = try databaseAccess.fetch(db)
                 let region = try DatabaseRegion.union(regions)(db)
                 let initialRegion = try region.observableRegion(db)
-                return (fetchedValue, initialRegion, WALSnapshot(db))
+                return (fetchedValue, initialRegion)
                 
             case .constantRegionRecordedFromSelection,
                     .nonConstantRegionRecordedFromSelection:
                 let (fetchedValue, initialRegion) = try databaseAccess.fetchRecordingObservedRegion(db)
-                return (fetchedValue, initialRegion, WALSnapshot(db))
+                return (fetchedValue, initialRegion)
             }
         }
         
@@ -306,8 +315,7 @@ extension ValueConcurrentObserver {
         // Start observation
         asyncStartObservation(
             from: databaseAccess,
-            initialSnapshot: initialSnapshot,
-            initialWALSnapshot: initialWALSnapshot,
+            initialFetchTransaction: initialFetchTransaction,
             initialRegion: initialRegion)
         
         return initialValue
@@ -322,78 +330,94 @@ extension ValueConcurrentObserver {
         // without having to wait for an eventual long-running write
         // transaction to complete.
         //
-        // TODO: we currently perform the initial read from a snapshot, because
-        // it is a handy way to keep a read transaction open until we grab a
-        // write access, and compare the database versions. The problem is that
-        // we do not control the number of created shapshots: we should instead
-        // use a reader from the pool.
-        do {
-            let initialSnapshot = try databaseAccess.dbPool.makeSnapshot()
-            initialSnapshot.asyncRead { dbResult in
-                let isNotifying = self.lock.synchronized { self.notificationCallbacks != nil }
-                guard isNotifying else { return /* Cancelled */ }
-                
-                do {
-                    // Fetch
-                    let fetchedValue: Reducer.Fetched
-                    let initialRegion: DatabaseRegion
-                    let db = try dbResult.get()
-                    switch self.trackingMode {
-                    case let .constantRegion(regions):
-                        fetchedValue = try databaseAccess.fetch(db)
-                        let region = try DatabaseRegion.union(regions)(db)
-                        initialRegion = try region.observableRegion(db)
+        // We perform the initial read from a long-lived WAL snapshot
+        // transaction, because it is a handy way to keep a read transaction
+        // open until we grab a write access, and compare the database versions.
+        databaseAccess.dbPool.asyncWALSnapshotTransaction { result in
+            let isNotifying = self.lock.synchronized { self.notificationCallbacks != nil }
+            guard isNotifying else { return /* Cancelled */ }
+            
+            do {
+                let initialFetchTransaction = try result.get()
+                // Second async jump because that's how
+                // `DatabasePool.asyncWALSnapshotTransaction` has to be used.
+                initialFetchTransaction.asyncRead { db in
+                    do {
+                        let fetchedValue: Reducer.Fetched
+                        let initialRegion: DatabaseRegion
                         
-                    case .constantRegionRecordedFromSelection,
-                            .nonConstantRegionRecordedFromSelection:
-                        (fetchedValue, initialRegion) = try databaseAccess.fetchRecordingObservedRegion(db)
-                    }
-                    
-                    // Reduce
-                    //
-                    // Reducing is performed asynchronously, so that we do not lock
-                    // a database dispatch queue longer than necessary.
-                    self.reduceQueue.async {
-                        let isNotifying = self.lock.synchronized { self.notificationCallbacks != nil }
-                        guard isNotifying else { return /* Cancelled */ }
-                        
-                        do {
-                            guard let initialValue = try self.reducer._value(fetchedValue) else {
-                                fatalError("Broken contract: reducer has no initial value")
-                            }
+                        switch self.trackingMode {
+                        case let .constantRegion(regions):
+                            fetchedValue = try databaseAccess.fetch(db)
+                            let region = try DatabaseRegion.union(regions)(db)
+                            initialRegion = try region.observableRegion(db)
                             
-                            // Notify
-                            self.scheduler.schedule {
-                                let onChange = self.lock.synchronized { self.notificationCallbacks?.onChange }
-                                guard let onChange else { return /* Cancelled */ }
-                                onChange(initialValue)
-                            }
-                        } catch {
-                            self.notifyError(error)
+                        case .constantRegionRecordedFromSelection,
+                                .nonConstantRegionRecordedFromSelection:
+                            (fetchedValue, initialRegion) = try databaseAccess.fetchRecordingObservedRegion(db)
                         }
+                        
+                        // Reduce
+                        //
+                        // Reducing is performed asynchronously, so that we do not lock
+                        // a database dispatch queue longer than necessary.
+                        self.reduceQueue.async {
+                            let isNotifying = self.lock.synchronized { self.notificationCallbacks != nil }
+                            guard isNotifying else { return /* Cancelled */ }
+                            
+                            do {
+                                guard let initialValue = try self.reducer._value(fetchedValue) else {
+                                    fatalError("Broken contract: reducer has no initial value")
+                                }
+                                
+                                // Notify
+                                self.scheduler.schedule {
+                                    let onChange = self.lock.synchronized { self.notificationCallbacks?.onChange }
+                                    guard let onChange else { return /* Cancelled */ }
+                                    onChange(initialValue)
+                                }
+                            } catch {
+                                self.notifyError(error)
+                            }
+                        }
+                        
+                        // Start observation
+                        self.asyncStartObservation(
+                            from: databaseAccess,
+                            initialFetchTransaction: initialFetchTransaction,
+                            initialRegion: initialRegion)
+                    } catch {
+                        self.notifyError(error)
                     }
-                    
-                    // Start observation
-                    self.asyncStartObservation(
-                        from: databaseAccess,
-                        initialSnapshot: initialSnapshot,
-                        initialWALSnapshot: WALSnapshot(db),
-                        initialRegion: initialRegion)
-                } catch {
-                    self.notifyError(error)
                 }
+            } catch {
+                self.notifyError(error)
             }
-        } catch {
-            self.notifyError(error)
         }
     }
     
     private func asyncStartObservation(
         from databaseAccess: DatabaseAccess,
-        initialSnapshot: DatabaseSnapshot,
-        initialWALSnapshot: WALSnapshot?,
+        initialFetchTransaction: WALSnapshotTransaction,
         initialRegion: DatabaseRegion)
     {
+        // We'll start the observation when we can access the writer
+        // connection. Until then, maybe the database has been modified
+        // since the initial fetch: we'll then need to notify a fresh value.
+        //
+        // To know if the database has been modified between the initial
+        // fetch and the writer access, we'll compare WAL snapshots.
+        //
+        // WAL snapshots can only be compared if the database is not
+        // checkpointed. That's why we'll keep `initialFetchTransaction`
+        // alive until the comparison is done.
+        //
+        // However, we want to release `initialFetchTransaction` as soon as
+        // possible, so that the reader connection it holds becomes
+        // available for other reads. It will be released when this optional
+        // is set to nil:
+        var initialFetchTransaction: WALSnapshotTransaction? = initialFetchTransaction
+        
         databaseAccess.dbPool.asyncWriteWithoutTransaction { writerDB in
             let events = self.lock.synchronized { self.notificationCallbacks?.events }
             guard let events else { return /* Cancelled */ }
@@ -401,22 +425,21 @@ extension ValueConcurrentObserver {
             do {
                 var observedRegion = initialRegion
                 
-                // Transaction is needed for comparing version snapshots
                 try writerDB.isolated(readOnly: true) {
-                    // Keep DatabaseSnaphot alive until we have compared
-                    // database versions. It prevents database checkpointing,
-                    // and keeps WAL snapshots (`sqlite3_snapshot`) valid
-                    // and comparable.
-                    let isModified = withExtendedLifetime(initialSnapshot) {
-                        guard let initialWALSnapshot,
-                              let currentWALSnapshot = WALSnapshot(writerDB)
-                        else {
-                            return true
-                        }
-                        let ordering = initialWALSnapshot.compare(currentWALSnapshot)
+                    // Was the database modified since the initial fetch?
+                    let isModified: Bool
+                    if let currentWALSnapshot = try? WALSnapshot(writerDB) {
+                        let ordering = initialFetchTransaction!.walSnapshot.compare(currentWALSnapshot)
                         assert(ordering <= 0, "Unexpected snapshot ordering")
-                        return ordering < 0
+                        isModified = ordering < 0
+                    } else {
+                        // Can't compare: assume the database was modified.
+                        isModified = true
                     }
+                    
+                    // Comparison done: end the WAL snapshot transaction
+                    // and release its reader connection.
+                    initialFetchTransaction = nil
                     
                     if isModified {
                         events.databaseDidChange?()
@@ -452,7 +475,7 @@ extension ValueConcurrentObserver {
                                 let value = try self.reducer._value(fetchedValue)
                                 
                                 // Notify
-                                if let value = value {
+                                if let value {
                                     self.scheduler.schedule {
                                         let onChange = self.lock.synchronized { self.notificationCallbacks?.onChange }
                                         guard let onChange else { return /* Cancelled */ }
@@ -478,6 +501,175 @@ extension ValueConcurrentObserver {
         }
     }
 }
+#else
+extension ValueConcurrentObserver {
+    /// Synchronously starts the observation, and returns the initial value.
+    ///
+    /// Unlike `asyncStart()`, this method does not notify the initial value or error.
+    private func syncStart(from databaseAccess: DatabaseAccess) throws -> Reducer.Value {
+        // Start from a read access. The whole point of using a DatabasePool
+        // for observing the database is to be able to fetch the initial value
+        // without having to wait for an eventual long-running write
+        // transaction to complete.
+        let (fetchedValue, initialRegion) = try databaseAccess.dbPool.read { db -> (Reducer.Fetched, DatabaseRegion) in
+            switch trackingMode {
+            case let .constantRegion(regions):
+                let fetchedValue = try databaseAccess.fetch(db)
+                let region = try DatabaseRegion.union(regions)(db)
+                let initialRegion = try region.observableRegion(db)
+                return (fetchedValue, initialRegion)
+                
+            case .constantRegionRecordedFromSelection,
+                    .nonConstantRegionRecordedFromSelection:
+                let (fetchedValue, initialRegion) = try databaseAccess.fetchRecordingObservedRegion(db)
+                return (fetchedValue, initialRegion)
+            }
+        }
+        
+        // Reduce
+        let initialValue = try reduceQueue.sync {
+            guard let initialValue = try reducer._value(fetchedValue) else {
+                fatalError("Broken contract: reducer has no initial value")
+            }
+            return initialValue
+        }
+        
+        // Start observation
+        asyncStartObservation(
+            from: databaseAccess,
+            initialRegion: initialRegion)
+        
+        return initialValue
+    }
+    
+    /// Asynchronously starts the observation
+    ///
+    /// Unlike `syncStart()`, this method does notify the initial value or error.
+    private func asyncStart(from databaseAccess: DatabaseAccess) {
+        // Start from a read access. The whole point of using a DatabasePool
+        // for observing the database is to be able to fetch the initial value
+        // without having to wait for an eventual long-running write
+        // transaction to complete.
+        databaseAccess.dbPool.asyncRead { dbResult in
+            let isNotifying = self.lock.synchronized { self.notificationCallbacks != nil }
+            guard isNotifying else { return /* Cancelled */ }
+            
+            do {
+                // Fetch
+                let fetchedValue: Reducer.Fetched
+                let initialRegion: DatabaseRegion
+                let db = try dbResult.get()
+                switch self.trackingMode {
+                case let .constantRegion(regions):
+                    fetchedValue = try databaseAccess.fetch(db)
+                    let region = try DatabaseRegion.union(regions)(db)
+                    initialRegion = try region.observableRegion(db)
+                    
+                case .constantRegionRecordedFromSelection,
+                        .nonConstantRegionRecordedFromSelection:
+                    (fetchedValue, initialRegion) = try databaseAccess.fetchRecordingObservedRegion(db)
+                }
+                
+                // Reduce
+                //
+                // Reducing is performed asynchronously, so that we do not lock
+                // a database dispatch queue longer than necessary.
+                self.reduceQueue.async {
+                    let isNotifying = self.lock.synchronized { self.notificationCallbacks != nil }
+                    guard isNotifying else { return /* Cancelled */ }
+                    
+                    do {
+                        guard let initialValue = try self.reducer._value(fetchedValue) else {
+                            fatalError("Broken contract: reducer has no initial value")
+                        }
+                        
+                        // Notify
+                        self.scheduler.schedule {
+                            let onChange = self.lock.synchronized { self.notificationCallbacks?.onChange }
+                            guard let onChange else { return /* Cancelled */ }
+                            onChange(initialValue)
+                        }
+                    } catch {
+                        self.notifyError(error)
+                    }
+                }
+                
+                // Start observation
+                self.asyncStartObservation(
+                    from: databaseAccess,
+                    initialRegion: initialRegion)
+            } catch {
+                self.notifyError(error)
+            }
+        }
+    }
+    
+    private func asyncStartObservation(
+        from databaseAccess: DatabaseAccess,
+        initialRegion: DatabaseRegion)
+    {
+        databaseAccess.dbPool.asyncWriteWithoutTransaction { writerDB in
+            let events = self.lock.synchronized { self.notificationCallbacks?.events }
+            guard let events else { return /* Cancelled */ }
+            events.databaseDidChange?()
+            
+            do {
+                try writerDB.isolated(readOnly: true) {
+                    // Fetch
+                    let fetchedValue: Reducer.Fetched
+                    let observedRegion: DatabaseRegion
+                    switch self.trackingMode {
+                    case .constantRegion:
+                        fetchedValue = try databaseAccess.fetch(writerDB)
+                        observedRegion = initialRegion
+                        events.willTrackRegion?(initialRegion)
+                        self.startObservation(writerDB, observedRegion: initialRegion)
+                        
+                    case .constantRegionRecordedFromSelection,
+                            .nonConstantRegionRecordedFromSelection:
+                        (fetchedValue, observedRegion) = try databaseAccess.fetchRecordingObservedRegion(writerDB)
+                        events.willTrackRegion?(observedRegion)
+                        self.startObservation(writerDB, observedRegion: observedRegion)
+                    }
+                    
+                    // Reduce
+                    //
+                    // Reducing is performed asynchronously, so that we do not lock
+                    // the writer dispatch queue longer than necessary.
+                    //
+                    // Important: reduceQueue.async guarantees the same ordering
+                    // between transactions and notifications!
+                    self.reduceQueue.async {
+                        let isNotifying = self.lock.synchronized { self.notificationCallbacks != nil }
+                        guard isNotifying else { return /* Cancelled */ }
+                        
+                        do {
+                            let value = try self.reducer._value(fetchedValue)
+                            
+                            // Notify
+                            if let value {
+                                self.scheduler.schedule {
+                                    let onChange = self.lock.synchronized { self.notificationCallbacks?.onChange }
+                                    guard let onChange else { return /* Cancelled */ }
+                                    onChange(value)
+                                }
+                            }
+                        } catch {
+                            let dbPool = self.lock.synchronized { self.databaseAccess?.dbPool }
+                            dbPool?.asyncWriteWithoutTransaction { writerDB in
+                                self.stopDatabaseObservation(writerDB)
+                            }
+                            self.notifyError(error)
+                        }
+                    }
+                }
+            } catch {
+                self.notifyError(error)
+            }
+        }
+    }
+}
+#endif
 
 // MARK: - Observing Database Transactions
 
@@ -516,13 +708,10 @@ extension ValueConcurrentObserver: TransactionObserver {
         events.databaseDidChange?()
         
         // Fetch
-        let future: DatabaseFuture<Reducer.Fetched>
-        
         switch trackingMode {
         case .constantRegion, .constantRegionRecordedFromSelection:
-            future = databaseAccess.dbPool.concurrentRead { db in
-                try databaseAccess.fetch(db)
-            }
+            setNeedsFetching(databaseAccess: databaseAccess)
+            
         case .nonConstantRegionRecordedFromSelection:
             // When the tracked region is not constant, we can't perform
             // concurrent fetches of observed values.
@@ -547,26 +736,63 @@ extension ValueConcurrentObserver: TransactionObserver {
                 }
                 
                 observationState.region = observedRegion
-                future = DatabaseFuture(.success(fetchedValue))
+                reduce(.success(fetchedValue))
             } catch {
                 stopDatabaseObservation(writerDB)
                 notifyError(error)
                 return
             }
         }
-        
-        // Reduce
-        //
-        // Reducing is performed asynchronously, so that we do not lock
-        // the writer dispatch queue longer than necessary.
-        //
-        // Important: reduceQueue.async guarantees the same ordering between
-        // transactions and notifications!
+    }
+    
+    private func setNeedsFetching(databaseAccess: DatabaseAccess) {
+        $fetchingState.update { state in
+            switch state {
+            case .idle:
+                state = .fetching
+                asyncFetch(databaseAccess: databaseAccess)
+                
+            case .fetching:
+                state = .fetchingAndNeedsFetch
+                
+            case .fetchingAndNeedsFetch:
+                break
+            }
+        }
+    }
+    
+    private func asyncFetch(databaseAccess: DatabaseAccess) {
+        databaseAccess.dbPool.asyncRead { [self] dbResult in
+            let isNotifying = self.lock.synchronized { self.notificationCallbacks != nil }
+            guard isNotifying else { return /* Cancelled */ }
+            
+            let fetchResult = dbResult.flatMap { db in
+                Result { try databaseAccess.fetch(db) }
+            }
+            
+            self.reduce(fetchResult)
+            
+            $fetchingState.update { state in
+                switch state {
+                case .idle:
+                    // GRDB bug
+                    preconditionFailure()
+                    
+                case .fetching:
+                    state = .idle
+                    
+                case .fetchingAndNeedsFetch:
+                    state = .fetching
+                    asyncFetch(databaseAccess: databaseAccess)
+                }
+            }
+        }
+    }
+    
+    private func reduce(_ fetchResult: Result<Reducer.Fetched, Error>) {
         reduceQueue.async {
             do {
-                // Wait until fetch has completed
-                // TODO: find a way to guarantee correct ordering without waiting for a semaphore and blocking a thread.
-                let fetchedValue = try future.wait()
+                let fetchedValue = try fetchResult.get()
                 
                 let isNotifying = self.lock.synchronized { self.notificationCallbacks != nil }
                 guard isNotifying else { return /* Cancelled */ }
@@ -574,7 +800,7 @@ extension ValueConcurrentObserver: TransactionObserver {
                 let value = try self.reducer._value(fetchedValue)
                 
                 // Notify value
-                if let value = value {
+                if let value {
                     self.scheduler.schedule {
                         let onChange = self.lock.synchronized { self.notificationCallbacks?.onChange }
                         guard let onChange else { return /* Cancelled */ }
