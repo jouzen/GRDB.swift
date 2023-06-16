@@ -7,6 +7,8 @@ GRDB adheres to [Semantic Versioning](https://semver.org/), with one exception: 
 
 #### 6.x Releases
 
+- `6.15.x` Releases - [6.15.0](#6150)
+- `6.14.x` Releases - [6.14.0](#6140)
 - `6.13.x` Releases - [6.13.0](#6130)
 - `6.12.x` Releases - [6.12.0](#6120)
 - `6.11.x` Releases - [6.11.0](#6110)
@@ -110,6 +112,23 @@ GRDB adheres to [Semantic Versioning](https://semver.org/), with one exception: 
 - [0.110.0](#01100), ...
 
 ---
+
+## 6.15.0
+
+Released June 2, 2023 &bull; [diff](https://github.com/groue/GRDB.swift/compare/v6.14.0...v6.15.0)
+
+- **New**: [#1382](https://github.com/groue/GRDB.swift/pull/1382) Add `DerivableRequest.all()`
+- **New**: [#1384](https://github.com/groue/GRDB.swift/pull/1384) Allow ValueObservation to start from a truncated wal file
+- **Documentation Update**: The [ValueObservation Performance](https://swiftpackageindex.com/groue/grdb.swift/documentation/grdb/valueobservation#ValueObservation-Performance) documentation chapter explains how truncating WAL checkpoints impact `ValueObservation`.
+
+
+## 6.14.0
+
+Released May 25, 2023 &bull; [diff](https://github.com/groue/GRDB.swift/compare/v6.13.0...v6.14.0)
+
+- **New**: [#1376](https://github.com/groue/GRDB.swift/pull/1376) Bitwise operations
+- **New**: [#1379](https://github.com/groue/GRDB.swift/pull/1379) Create indexes with a default name
+
 
 ## 6.13.0
 
