@@ -42,7 +42,7 @@ import Foundation
 /// - ``hasCompletedMigrations(_:)``
 public struct DatabaseMigrator {
     /// Controls how a migration handle foreign keys constraints.
-    public enum ForeignKeyChecks {
+    public enum ForeignKeyChecks: Sendable {
         /// The migration runs with disabled foreign keys.
         ///
         /// Foreign keys are checked right before changes are committed on disk,
@@ -50,7 +50,7 @@ public struct DatabaseMigrator {
         /// ``DatabaseMigrator/disablingDeferredForeignKeyChecks()``.
         ///
         /// In this case, you can perform your own deferred foreign key checks
-        /// with ``Database/checkForeignKeys(in:)`` or
+        /// with ``Database/checkForeignKeys(in:in:)`` or
         /// ``Database/checkForeignKeys()``:
         /// 
         /// ```swift
@@ -118,7 +118,7 @@ public struct DatabaseMigrator {
     /// The returned migrator is _unsafe_, because it no longer guarantees the
     /// integrity of the database. It is now _your_ responsibility to register
     /// migrations that do not break foreign key constraints. See
-    /// ``Database/checkForeignKeys()`` and ``Database/checkForeignKeys(in:)``.
+    /// ``Database/checkForeignKeys()`` and ``Database/checkForeignKeys(in:in:)``.
     ///
     /// Running migrations without foreign key checks can improve migration
     /// performance on huge databases.
@@ -269,8 +269,8 @@ public struct DatabaseMigrator {
         writer.asyncBarrierWriteWithoutTransaction { dbResult in
             do {
                 let db = try dbResult.get()
-                if let lastMigration = self._migrations.last {
-                    try self.migrate(db, upTo: lastMigration.identifier)
+                if let lastMigration = _migrations.last {
+                    try migrate(db, upTo: lastMigration.identifier)
                 }
                 completion(.success(db))
             } catch {
@@ -409,7 +409,7 @@ public struct DatabaseMigrator {
         if eraseDatabaseOnSchemaChange {
             var needsErase = false
             try db.inTransaction(.deferred) {
-                let appliedIdentifiers = try self.appliedIdentifiers(db)
+                let appliedIdentifiers = try appliedIdentifiers(db)
                 let knownIdentifiers = Set(_migrations.map { $0.identifier })
                 if !appliedIdentifiers.isSubset(of: knownIdentifiers) {
                     // Database contains an unknown migration
@@ -446,7 +446,7 @@ public struct DatabaseMigrator {
                         //
                         // So let's create a "regular" temporary database:
                         let tmpURL = URL(fileURLWithPath: NSTemporaryDirectory())
-                            .appendingPathComponent(ProcessInfo().globallyUniqueString)
+                            .appendingPathComponent(ProcessInfo.processInfo.globallyUniqueString)
                         defer {
                             try? FileManager().removeItem(at: tmpURL)
                         }

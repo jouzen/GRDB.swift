@@ -361,6 +361,11 @@ public class SQLStatementCursor {
     }
 }
 
+// Explicit non-conformance to Sendable: database cursors must be used from
+// a serialized database access dispatch queue.
+@available(*, unavailable)
+extension SQLStatementCursor: Sendable { }
+
 extension SQLStatementCursor: Cursor {
     public func next() throws -> Statement? {
         guard offset < cString.count - 1 /* trailing \0 */ else {
@@ -373,7 +378,7 @@ extension SQLStatementCursor: Cursor {
             let baseAddress = buffer.baseAddress! // never nil because the buffer contains the trailing \0.
             
             // Compile next statement
-            var statementEnd: UnsafePointer<Int8>? = nil
+            var statementEnd: UnsafePointer<CChar>? = nil
             let statement = try Statement(
                 database: database,
                 statementStart: baseAddress + offset,

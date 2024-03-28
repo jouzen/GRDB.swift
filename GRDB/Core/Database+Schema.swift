@@ -57,6 +57,14 @@ extension Database {
             case let .attached(name): return "\(name).sqlite_master"
             }
         }
+        
+        /// The name of the master sqlite table, without the schema name.
+        var unqualifiedMasterTableName: String { // swiftlint:disable:this inclusive_language
+            switch self {
+            case .main, .attached: return "sqlite_master"
+            case .temp: return "sqlite_temp_master"
+            }
+        }
     }
     
     /// The identifier of a database table or view.
@@ -146,6 +154,19 @@ extension Database {
         return schemaIdentifiers
     }
     
+    /// The `SchemaIdentifier` named `schemaName` if it exists.
+    ///
+    /// - throws: A ``DatabaseError`` whenever an SQLite error occurs, or 
+    /// if no such schema exists.
+    private func schemaIdentifier(named schemaName: String) throws -> SchemaIdentifier {
+        let allIdentifiers = try schemaIdentifiers()
+        if let result = allIdentifiers.first(where: { $0.sql.lowercased() == schemaName.lowercased() }) {
+            return result
+        } else {
+            throw DatabaseError.noSuchSchema(schemaName)
+        }
+    }
+    
 #if GRDBCUSTOMSQLITE || GRDBCIPHER
     /// Returns information about a table or a view
     func table(_ tableName: String) throws -> TableInfo? {
@@ -202,10 +223,19 @@ extension Database {
         return tableInfo
     }
     
-    /// Returns whether a table exists, in the main or temp schema, or in an
-    /// attached database.
-    public func tableExists(_ name: String) throws -> Bool {
-        try schemaIdentifiers().contains {
+    /// Returns whether a table exists
+    ///
+    /// When `schemaName` is not specified, known schemas are iterated in
+    /// SQLite resolution order and the first matching result is returned.
+    ///
+    /// - throws: A ``DatabaseError`` whenever an SQLite error occurs, or
+    /// if the specified schema does not exist
+    public func tableExists(_ name: String, in schemaName: String? = nil) throws -> Bool {
+        if let schemaName {
+            return try exists(type: .table, name: name, in: schemaName)
+        }
+        
+        return try schemaIdentifiers().contains {
             try exists(type: .table, name: name, in: $0)
         }
     }
@@ -238,17 +268,54 @@ extension Database {
     
     /// Returns whether a view exists, in the main or temp schema, or in an
     /// attached database.
-    public func viewExists(_ name: String) throws -> Bool {
-        try schemaIdentifiers().contains {
+    ///
+    /// When `schemaName` is not specified, known schemas are iterated in
+    /// SQLite resolution order and the first matching result is returned.
+    ///
+    /// - throws: A ``DatabaseError`` whenever an SQLite error occurs, or
+    /// if the specified schema does not exist
+    public func viewExists(_ name: String, in schemaName: String? = nil) throws -> Bool {
+        if let schemaName {
+            return try exists(type: .view, name: name, in: schemaName)
+        }
+        
+        return try schemaIdentifiers().contains {
             try exists(type: .view, name: name, in: $0)
         }
     }
     
     /// Returns whether a trigger exists, in the main or temp schema, or in an
     /// attached database.
-    public func triggerExists(_ name: String) throws -> Bool {
-        try schemaIdentifiers().contains {
+    ///
+    /// When `schemaName` is not specified, known schemas are iterated in
+    /// SQLite resolution order and the first matching result is returned.
+    ///
+    /// - throws: A ``DatabaseError`` whenever an SQLite error occurs, or
+    /// if the specified schema does not exist
+    public func triggerExists(_ name: String, in schemaName: String? = nil) throws -> Bool {
+        if let schemaName {
+            return try exists(type: .trigger, name: name, in: schemaName)
+        }
+        
+        return try schemaIdentifiers().contains {
             try exists(type: .trigger, name: name, in: $0)
+        }
+    }
+    
+    /// Checks if an entity exists in a given schema
+    ///
+    /// This is checking for the existence of the entity specified by
+    /// `type` and `name`. It is assumed that the existence of a schema
+    /// named `schemaName` is already known and will throw an error if it
+    /// cannot be found.
+    ///
+    /// - throws: A ``DatabaseError`` whenever an SQLite error occurs, or
+    /// if the specified schema does not exist
+    private func exists(type: SchemaObjectType, name: String, in schemaName: String) throws -> Bool {
+        if let schemaID = try schemaIdentifiers().first(where: { $0.sql.lowercased() == schemaName.lowercased() }) {
+            return try exists(type: type, name: name, in: schemaID)
+        } else {
+            throw DatabaseError.noSuchSchema(schemaName)
         }
     }
     
@@ -264,10 +331,17 @@ extension Database {
     /// table has no explicit primary key, the result is the hidden
     /// "rowid" column.
     ///
-    /// - throws: A ``DatabaseError`` whenever an SQLite error occurs, or if no
-    /// such table exists in the main or temp schema, or in an
-    /// attached database.
-    public func primaryKey(_ tableName: String) throws -> PrimaryKeyInfo {
+    /// When `schemaName` is not specified, known schemas are iterated in
+    /// SQLite resolution order and the first matching result is returned.
+    ///
+    /// - throws: A ``DatabaseError`` whenever an SQLite error occurs, if
+    /// the specified schema does not exist, or if no such table exists in
+    /// the main or temp schema, or in an attached database.
+    public func primaryKey(_ tableName: String, in schemaName: String? = nil) throws -> PrimaryKeyInfo {
+        if let schemaName {
+            return try introspect(tableNamed: tableName, inSchemaNamed: schemaName, using: primaryKey(_:))
+        }
+        
         for schemaIdentifier in try schemaIdentifiers() {
             if let result = try primaryKey(TableIdentifier(schemaID: schemaIdentifier, name: tableName)) {
                 return result
@@ -354,13 +428,13 @@ extension Database {
             // FIXME: We ignore the exception, and consider all INTEGER primary
             // keys as aliases for the rowid:
             if pkColumn.type.uppercased() == "INTEGER" {
-                primaryKey = .rowID(pkColumn.name)
+                primaryKey = .rowID(pkColumn)
             } else {
-                primaryKey = try .regular([pkColumn.name], tableHasRowID: tableHasRowID(table))
+                primaryKey = try .regular([pkColumn], tableHasRowID: tableHasRowID(table))
             }
         default:
             // Multi-columns primary key
-            primaryKey = try .regular(pkColumns.map(\.name), tableHasRowID: tableHasRowID(table))
+            primaryKey = try .regular(pkColumns, tableHasRowID: tableHasRowID(table))
         }
         
         schemaCache[table.schemaID].set(primaryKey: .value(primaryKey), forTable: table.name)
@@ -426,10 +500,18 @@ extension Database {
     /// the columns contain the primary key or a unique index, use
     /// ``table(_:hasUniqueKey:)``.
     ///
-    /// - throws: A ``DatabaseError`` whenever an SQLite error occurs, or if no
-    /// such table exists in the main or temp schema, or in an
-    /// attached database.
-    public func indexes(on tableName: String) throws -> [IndexInfo] {
+    /// When `schemaName` is not specified, known schemas are iterated in
+    /// SQLite resolution order and the first matching result is returned.
+    ///
+    /// - throws: A ``DatabaseError`` whenever an SQLite error occurs, if
+    /// the specified schema does not exist, or if no such table or view
+    /// with this name exists in the main or temp schema, or in an attached
+    /// database.
+    public func indexes(on tableName: String, in schemaName: String? = nil) throws -> [IndexInfo] {
+        if let schemaName {
+            return try introspect(tableNamed: tableName, inSchemaNamed: schemaName, using: indexes(on:))
+        }
+        
         for schemaIdentifier in try schemaIdentifiers() {
             if let result = try indexes(on: TableIdentifier(schemaID: schemaIdentifier, name: tableName)) {
                 return result
@@ -518,10 +600,18 @@ extension Database {
     
     /// Returns the foreign keys defined on table named `tableName`.
     ///
-    /// - throws: A ``DatabaseError`` whenever an SQLite error occurs, or if no
-    /// such table exists in the main or temp schema, or in an
-    /// attached database.
-    public func foreignKeys(on tableName: String) throws -> [ForeignKeyInfo] {
+    /// When `schemaName` is not specified, known schemas are iterated in
+    /// SQLite resolution order and the first matching result is returned.
+    ///
+    /// - throws: A ``DatabaseError`` whenever an SQLite error occurs, if
+    /// the specified schema does not exist, or if no such table or view
+    /// with this name exists in the main or temp schema, or in an attached
+    /// database.
+    public func foreignKeys(on tableName: String, in schemaName: String? = nil) throws -> [ForeignKeyInfo] {
+        if let schemaName {
+            return try introspect(tableNamed: tableName, inSchemaNamed: schemaName, using: foreignKeys(on:))
+        }
+        
         for schemaIdentifier in try schemaIdentifiers() {
             if let result = try foreignKeys(on: TableIdentifier(schemaID: schemaIdentifier, name: tableName)) {
                 return result
@@ -602,10 +692,27 @@ extension Database {
     
     /// Returns a cursor over foreign key violations in the table.
     ///
-    /// - throws: A ``DatabaseError`` whenever an SQLite error occurs, or if no
-    /// such table exists in the main or temp schema, or in an
-    /// attached database.
-    public func foreignKeyViolations(in tableName: String) throws -> RecordCursor<ForeignKeyViolation> {
+    /// When `schemaName` is not specified, known schemas are checked in
+    /// SQLite resolution order and the first matching table is used.
+    ///
+    /// - throws: A ``DatabaseError`` whenever an SQLite error occurs, if
+    /// the specified schema does not exist, or if no such table or view
+    /// with this name exists in the main or temp schema, or in an attached
+    /// database.
+    public func foreignKeyViolations(
+        in tableName: String,
+        in schemaName: String? = nil)
+    throws -> RecordCursor<ForeignKeyViolation>
+    {
+        if let schemaName {
+            let schemaID = try schemaIdentifier(named: schemaName)
+            if try exists(type: .table, name: tableName, in: schemaID) {
+                return try foreignKeyViolations(in: TableIdentifier(schemaID: schemaID, name: tableName))
+            } else {
+                throw DatabaseError.noSuchTable(tableName)
+            }
+        }
+        
         for schemaIdentifier in try schemaIdentifiers() {
             if try exists(type: .table, name: tableName, in: schemaIdentifier) {
                 return try foreignKeyViolations(in: TableIdentifier(schemaID: schemaIdentifier, name: tableName))
@@ -634,14 +741,21 @@ extension Database {
     
     /// Throws an error if there exists a foreign key violation in the table.
     ///
+    /// When `schemaName` is not specified, known schemas are checked in
+    /// SQLite resolution order and the first matching table is used.
+    ///
     /// On the first foreign key violation found in the table, this method
     /// throws a ``DatabaseError`` with extended code
     /// `SQLITE_CONSTRAINT_FOREIGNKEY`.
     ///
     /// If you are looking for the list of foreign key violations, prefer
-    /// ``foreignKeyViolations(in:)`` instead.
-    public func checkForeignKeys(in tableName: String) throws {
-        try checkForeignKeys(from: foreignKeyViolations(in: tableName))
+    /// ``foreignKeyViolations(in:in:)`` instead.
+    ///
+    /// - throws: A ``DatabaseError`` as described above; when a
+    /// specified schema does not exist; if no such table or view with this
+    /// name exists in the main or temp schema or in an attached database.
+    public func checkForeignKeys(in tableName: String, in schemaName: String? = nil) throws {
+        try checkForeignKeys(from: foreignKeyViolations(in: tableName, in: schemaName))
     }
     
     private func checkForeignKeys(from violations: RecordCursor<ForeignKeyViolation>) throws {
@@ -658,8 +772,16 @@ extension Database {
     /// attached database.
     func canonicalTableName(_ tableName: String) throws -> String? {
         for schemaIdentifier in try schemaIdentifiers() {
+            // Regular tables
             if let result = try schema(schemaIdentifier).canonicalName(tableName, ofType: .table) {
                 return result
+            }
+            
+            // Master table (sqlite_master, sqlite_temp_master)
+            // swiftlint:disable:next inclusive_language
+            let masterTableName = schemaIdentifier.unqualifiedMasterTableName
+            if tableName.lowercased() == masterTableName.lowercased() {
+                return masterTableName
             }
         }
         return nil
@@ -673,16 +795,44 @@ extension Database {
         schemaCache[schemaID].schemaInfo = schemaInfo
         return schemaInfo
     }
+    
+    /// Attempts to perform a table introspection function on a given
+    /// table and schema
+    ///
+    /// - parameter tableName: The name of the table to examine
+    /// - parameter schemaName: The name of the schema to check
+    /// - parameter introspector: An introspection function taking a
+    /// `TableIdentifier` as the only parameter
+    private func introspect<T>(
+        tableNamed tableName: String,
+        inSchemaNamed schemaName: String,
+        using introspector: (TableIdentifier) throws -> T?
+    ) throws -> T {
+        let schemaIdentifier = try schemaIdentifier(named: schemaName)
+        if let result = try introspector(TableIdentifier(schemaID: schemaIdentifier, name: tableName)) {
+            return result
+        } else {
+            throw DatabaseError.noSuchTable(tableName)
+        }
+    }
 }
 
 extension Database {
     
     /// Returns the columns in a table or a view.
     ///
-    /// - throws: A ``DatabaseError`` whenever an SQLite error occurs, or if no
-    /// such table or view with this name exists in the main or temp schema, or
-    /// in an attached database.
-    public func columns(in tableName: String) throws -> [ColumnInfo] {
+    /// When `schemaName` is not specified, known schemas are iterated in
+    /// SQLite resolution order and the first matching result is returned.
+    ///
+    /// - throws: A ``DatabaseError`` whenever an SQLite error occurs, if
+    /// the specified schema does not exist,or if no such table or view
+    /// with this name exists in the main or temp schema, or in an attached
+    /// database.
+    public func columns(in tableName: String, in schemaName: String? = nil) throws -> [ColumnInfo] {
+        if let schemaName {
+            return try introspect(tableNamed: tableName, inSchemaNamed: schemaName, using: columns(in:))
+        }
+        
         for schemaIdentifier in try schemaIdentifiers() {
             if let result = try columns(in: TableIdentifier(schemaID: schemaIdentifier, name: tableName)) {
                 return result
@@ -840,14 +990,14 @@ extension Database {
 
 /// Information about a column of a database table.
 ///
-/// You get `ColumnInfo` instances with the ``Database/columns(in:)``
+/// You get `ColumnInfo` instances with the ``Database/columns(in:in:)``
 /// `Database` method.
 ///
 /// Related SQLite documentation:
 ///
 /// - [pragma `table_info`](https://www.sqlite.org/pragma.html#pragma_table_info)
 /// - [pragma `table_xinfo`](https://www.sqlite.org/pragma.html#pragma_table_xinfo)
-public struct ColumnInfo: FetchableRecord {
+public struct ColumnInfo: FetchableRecord, Sendable {
     let cid: Int
     let hidden: Int?
     
@@ -858,7 +1008,21 @@ public struct ColumnInfo: FetchableRecord {
     ///
     /// The casing of this string depends on the SQLite version: make sure you
     /// process this string in a case-insensitive way.
+    ///
+    /// The type is the empty string when the column has no declared type.
     public let type: String
+    
+    /// The column data type (nil when the column has no declared type).
+    ///
+    /// The casing of the raw value depends on the SQLite version: make sure
+    /// you process the result in a case-insensitive way.
+    var columnType: Database.ColumnType? {
+        if type.isEmpty {
+            return nil
+        } else {
+            return Database.ColumnType(rawValue: type)
+        }
+    }
     
     /// A boolean value indicating if the column is constrained to be not null.
     public let isNotNull: Bool
@@ -912,16 +1076,16 @@ public struct ColumnInfo: FetchableRecord {
 
 /// Information about an index.
 ///
-/// You get `IndexInfo` instances with the ``Database/indexes(on:)``
+/// You get `IndexInfo` instances with the ``Database/indexes(on:in:)``
 /// `Database` method.
 ///
 /// Related SQLite documentation:
 ///
 /// - [pragma `index_list`](https://www.sqlite.org/pragma.html#pragma_index_list)
 /// - [pragma `index_info`](https://www.sqlite.org/pragma.html#pragma_index_info)
-public struct IndexInfo {
+public struct IndexInfo: Sendable{
     /// The origin of an index.
-    public struct Origin: RawRepresentable, Equatable, DatabaseValueConvertible {
+    public struct Origin: RawRepresentable, Equatable, DatabaseValueConvertible, Sendable {
         public var rawValue: String
         
         public init(rawValue: String) {
@@ -955,7 +1119,7 @@ public struct IndexInfo {
 ///
 /// You get instances of `ForeignKeyViolation` from the `Database` methods
 /// ``Database/foreignKeyViolations()`` and
-/// ``Database/foreignKeyViolations(in:)`` methods.
+/// ``Database/foreignKeyViolations(in:in:)`` methods.
 ///
 /// For example:
 ///
@@ -994,7 +1158,7 @@ public struct IndexInfo {
 /// ```
 ///
 /// Related SQLite documentation: <https://www.sqlite.org/pragma.html#pragma_foreign_key_check>
-public struct ForeignKeyViolation {
+public struct ForeignKeyViolation: Sendable {
     /// The name of the table that contains the foreign key.
     public var originTable: String
     
@@ -1009,7 +1173,7 @@ public struct ForeignKeyViolation {
     /// The id of the foreign key constraint that failed.
     ///
     /// This id matches the ``ForeignKeyInfo/id`` property in
-    /// ``ForeignKeyInfo``. See ``Database/foreignKeys(on:)``.
+    /// ``ForeignKeyInfo``. See ``Database/foreignKeys(on:in:)``.
     public var foreignKeyId: Int
     
     /// A precise description of the foreign key violation.
@@ -1099,7 +1263,7 @@ extension ForeignKeyViolation: CustomStringConvertible {
 
 /// Information about a primary key.
 ///
-/// You get `PrimaryKeyInfo` instances with the ``Database/primaryKey(_:)``
+/// You get `PrimaryKeyInfo` instances with the ``Database/primaryKey(_:in:)``
 /// `Database` method.
 ///
 /// When the table's primary key is the rowid:
@@ -1143,29 +1307,29 @@ extension ForeignKeyViolation: CustomStringConvertible {
 /// pk.rowIDColumn // nil
 /// pk.isRowID     // false
 /// ```
-public struct PrimaryKeyInfo {
+public struct PrimaryKeyInfo: Sendable {
     private enum Impl {
         /// The hidden rowID.
         case hiddenRowID
         
         /// An INTEGER PRIMARY KEY column that aliases the Row ID.
         /// Associated string is the column name.
-        case rowID(String)
+        case rowID(ColumnInfo)
         
         /// Any primary key, but INTEGER PRIMARY KEY.
         /// Associated strings are column names.
-        case regular(columns: [String], tableHasRowID: Bool)
+        case regular(columnInfos: [ColumnInfo], tableHasRowID: Bool)
     }
     
     private let impl: Impl
     
-    static func rowID(_ column: String) -> PrimaryKeyInfo {
-        PrimaryKeyInfo(impl: .rowID(column))
+    static func rowID(_ columnInfo: ColumnInfo) -> PrimaryKeyInfo {
+        PrimaryKeyInfo(impl: .rowID(columnInfo))
     }
     
-    static func regular(_ columns: [String], tableHasRowID: Bool) -> PrimaryKeyInfo {
-        assert(!columns.isEmpty)
-        return PrimaryKeyInfo(impl: .regular(columns: columns, tableHasRowID: tableHasRowID))
+    static func regular(_ columnInfos: [ColumnInfo], tableHasRowID: Bool) -> PrimaryKeyInfo {
+        assert(!columnInfos.isEmpty)
+        return PrimaryKeyInfo(impl: .regular(columnInfos: columnInfos, tableHasRowID: tableHasRowID))
     }
     
     static let hiddenRowID = PrimaryKeyInfo(impl: .hiddenRowID)
@@ -1175,21 +1339,34 @@ public struct PrimaryKeyInfo {
         switch impl {
         case .hiddenRowID:
             return [Column.rowID.name]
-        case let .rowID(column):
-            return [column]
-        case let .regular(columns: columns, tableHasRowID: _):
-            return columns
+        case let .rowID(columnInfo):
+            return [columnInfo.name]
+        case let .regular(columnInfos: columnInfos, tableHasRowID: _):
+            return columnInfos.map(\.name)
         }
     }
     
+    /// The columns in the primary key. Nil if the primary key is the
+    /// hidden rowID. Never empty otherwise.
+    var columnInfos: [ColumnInfo]? {
+        switch impl {
+        case .hiddenRowID:
+            return nil
+        case let .rowID(columnInfo):
+            return [columnInfo]
+        case let .regular(columnInfos: columnInfos, tableHasRowID: _):
+            return columnInfos
+        }
+    }
+
     /// When not nil, the name of the column that contains the
     /// `INTEGER PRIMARY KEY`.
     public var rowIDColumn: String? {
         switch impl {
         case .hiddenRowID:
             return nil
-        case .rowID(let column):
-            return column
+        case .rowID(let columnInfo):
+            return columnInfo.name
         case .regular:
             return nil
         }
@@ -1216,7 +1393,7 @@ public struct PrimaryKeyInfo {
             return true
         case .rowID:
             return true
-        case let .regular(columns: _, tableHasRowID: tableHasRowID):
+        case let .regular(columnInfos: _, tableHasRowID: tableHasRowID):
             return tableHasRowID
         }
     }
@@ -1252,11 +1429,11 @@ public struct PrimaryKeyInfo {
 
 /// Information about a foreign key.
 ///
-/// You get `ForeignKeyInfo` instances with the ``Database/foreignKeys(on:)``
+/// You get `ForeignKeyInfo` instances with the ``Database/foreignKeys(on:in:)``
 /// `Database` method.
 ///
 /// Related SQLite documentation: [pragma `foreign_key_list`](https://www.sqlite.org/pragma.html#pragma_foreign_key_list).
-public struct ForeignKeyInfo {
+public struct ForeignKeyInfo: Sendable {
     /// The first column in the output of the `foreign_key_list` pragma.
     public var id: Int
     
@@ -1316,10 +1493,6 @@ struct TableInfo: FetchableRecord {
 /// A value in the `type` column of `sqlite_master`.
 struct SchemaObjectType: Hashable, RawRepresentable, DatabaseValueConvertible {
     var rawValue: String
-    init(rawValue: String) {
-        self.rawValue = rawValue
-    }
-    
     static let index = SchemaObjectType(rawValue: "index")
     static let table = SchemaObjectType(rawValue: "table")
     static let trigger = SchemaObjectType(rawValue: "trigger")
@@ -1344,7 +1517,7 @@ struct SchemaObject: Hashable, FetchableRecord {
 
 /// All objects in a database schema (tables, views, indexes, triggers).
 struct SchemaInfo: Equatable {
-    private var objects: Set<SchemaObject>
+    let objects: Set<SchemaObject>
     
     /// Returns whether there exists a object of given type with this name
     /// (case-insensitive).

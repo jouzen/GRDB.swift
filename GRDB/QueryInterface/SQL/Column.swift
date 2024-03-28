@@ -27,6 +27,7 @@ public protocol ColumnExpression: SQLSpecificExpressible {
 }
 
 extension ColumnExpression {
+    /// Returns an SQL column.
     public var sqlExpression: SQLExpression {
         .column(name)
     }
@@ -65,17 +66,33 @@ extension ColumnExpression where Self == Column {
 
 /// A column in a database table.
 ///
+/// For example:
+///
+/// ```swift
+/// struct Player: TableRecord {
+///     var score: Int
+/// }
+///
+/// let maximumScore = try dbQueue.read { db in
+///     // SELECT MAX(score) FROM player
+///     try Player
+///         .select(max(Column("score")), as: Int.self)
+///         .fetchOne(db)
+/// }
+/// ```
+///
 /// ## Topics
 ///
 /// ### Standard Columns
 ///
 /// - ``rowID-3bn70``
+/// - ``rank``
 ///
 /// ### Creating A Column
 ///
 /// - ``init(_:)-5grmu``
 /// - ``init(_:)-7xc4z``
-public struct Column {
+public struct Column: Sendable {
     /// The hidden rowID column.
     public static let rowID = Column("rowid")
     

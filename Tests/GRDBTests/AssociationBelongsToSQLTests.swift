@@ -330,7 +330,7 @@ class AssociationBelongsToSQLTests: GRDBTestCase {
                 t.column("name", .text)
             }
             try db.create(table: "children") { t in
-                t.column("parentId", .integer).references("parents")
+                t.belongsTo("parent")
             }
         }
         
@@ -546,8 +546,8 @@ class AssociationBelongsToSQLTests: GRDBTestCase {
                 t.column("name", .text)
             }
             try db.create(table: "children") { t in
-                t.column("parent1Id", .integer).references("parents")
-                t.column("parent2Id", .integer).references("parents")
+                t.belongsTo("parent1", inTable: "parents")
+                t.belongsTo("parent2", inTable: "parents")
             }
         }
         
@@ -1733,6 +1733,81 @@ class AssociationBelongsToSQLTests: GRDBTestCase {
         }
     }
     
+    func testTableBelongsToView() throws {
+        try makeDatabaseQueue().write { db in
+            try db.execute(sql: """
+                CREATE TABLE child (foo);
+                CREATE VIEW parent AS SELECT 1 AS bar;
+                """)
+            
+            let child = Table("child")
+            let parent = Table("parent")
+            let foreignKey = ForeignKey(["foo"], to: ["bar"])
+            let association = child.belongsTo(parent, using: foreignKey)
+            
+            try assertEqualSQL(db, child.joining(required: association), """
+                SELECT "child".* \
+                FROM "child" \
+                JOIN "parent" ON "parent"."bar" = "child"."foo"
+                """)
+            try assertEqualSQL(db, child.joining(optional: association), """
+                SELECT "child".* \
+                FROM "child" \
+                LEFT JOIN "parent" ON "parent"."bar" = "child"."foo"
+                """)
+        }
+    }
+    
+    func testViewBelongsToTable() throws {
+        try makeDatabaseQueue().write { db in
+            try db.execute(sql: """
+                CREATE VIEW child AS SELECT 1 AS foo;
+                CREATE TABLE parent(id INTEGER PRIMARY KEY);
+                """)
+            
+            let child = Table("child")
+            let parent = Table("parent")
+            let foreignKey = ForeignKey(["foo"])
+            let association = child.belongsTo(parent, using: foreignKey)
+            
+            try assertEqualSQL(db, child.joining(required: association), """
+                SELECT "child".* \
+                FROM "child" \
+                JOIN "parent" ON "parent"."id" = "child"."foo"
+                """)
+            try assertEqualSQL(db, child.joining(optional: association), """
+                SELECT "child".* \
+                FROM "child" \
+                LEFT JOIN "parent" ON "parent"."id" = "child"."foo"
+                """)
+        }
+    }
+    
+    func testViewBelongsToView() throws {
+        try makeDatabaseQueue().write { db in
+            try db.execute(sql: """
+                CREATE VIEW child AS SELECT 1 AS foo;
+                CREATE VIEW parent AS SELECT 1 AS bar;
+                """)
+            
+            let child = Table("child")
+            let parent = Table("parent")
+            let foreignKey = ForeignKey(["foo"], to: ["bar"])
+            let association = child.belongsTo(parent, using: foreignKey)
+            
+            try assertEqualSQL(db, child.joining(required: association), """
+                SELECT "child".* \
+                FROM "child" \
+                JOIN "parent" ON "parent"."bar" = "child"."foo"
+                """)
+            try assertEqualSQL(db, child.joining(optional: association), """
+                SELECT "child".* \
+                FROM "child" \
+                LEFT JOIN "parent" ON "parent"."bar" = "child"."foo"
+                """)
+        }
+    }
+    
     // Regression test for https://github.com/groue/GRDB.swift/issues/495
     func testFetchCount() throws {
         let dbQueue = try makeDatabaseQueue()
@@ -1742,7 +1817,7 @@ class AssociationBelongsToSQLTests: GRDBTestCase {
             }
             try db.create(table: "b") { t in
                 t.autoIncrementedPrimaryKey("id")
-                t.column("aId", .integer).references("a")
+                t.belongsTo("a")
             }
             struct A: TableRecord { }
             struct B: TableRecord { }
@@ -1771,7 +1846,7 @@ class AssociationBelongsToSQLTests: GRDBTestCase {
                 t.column("name", .text)
             }
             try db.create(table: "children") { t in
-                t.column("parentId", .integer).references("parents")
+                t.belongsTo("parent")
             }
         }
         

@@ -172,15 +172,21 @@ class StatementArgumentsSink {
     private(set) var arguments: StatementArguments
     private let rawSQL: Bool
     
-    /// A sink which does not accept any arguments.
-    static let forRawSQL = StatementArgumentsSink(rawSQL: true)
+    /// A sink which turns all argument values into SQL literals.
+    ///
+    /// The `"WHERE name = \("O'Brien")"` SQL literal is turned into the
+    /// `WHERE name = 'O''Brien'` SQL.
+    static let literalValues = StatementArgumentsSink(rawSQL: true)
     
     private init(rawSQL: Bool) {
         self.arguments = []
         self.rawSQL = rawSQL
     }
     
-    /// A sink which accepts arguments
+    /// A sink which turns all argument values into `?` SQL parameters.
+    ///
+    /// The `"WHERE name = \("O'Brien")"` SQL literal is turned into the
+    /// `WHERE name = ?` SQL.
     convenience init() {
         self.init(rawSQL: false)
     }
@@ -423,6 +429,15 @@ public class TableAlias {
     /// ```
     public subscript(_ expression: some SQLSpecificExpressible & SQLSelectable & SQLOrderingTerm) -> SQLExpression {
         expression.sqlExpression.qualified(with: self)
+    }
+    
+    public subscript(_ expression: some SQLJSONExpressible &
+                     SQLSpecificExpressible &
+                     SQLSelectable &
+                     SQLOrderingTerm)
+    -> AnySQLJSONExpressible
+    {
+        AnySQLJSONExpressible(sqlExpression: expression.sqlExpression.qualified(with: self))
     }
     
     /// Returns an SQL ordering term that refers to the aliased table.

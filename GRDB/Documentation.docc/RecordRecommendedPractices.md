@@ -31,10 +31,8 @@ migrator.registerMigration("createLibrary") { db in
     try db.create(table: "book") { t in
         t.autoIncrementedPrimaryKey("id")
         t.column("title", .text).notNull()            // (5)
-        t.column("authorId", .integer)                // (6)
+        t.belongsTo("author", onDelete: .cascade)     // (6)
             .notNull()                                // (7)
-            .indexed()                                // (8)
-            .references("author", onDelete: .cascade) // (9)
     }
 }
 
@@ -46,10 +44,8 @@ try migrator.migrate(dbQueue)
 3. An author must have a name.
 4. The country of an author is not always known.
 5. A book must have a title.
-6. The `book.authorId` column is used to link a book to the author it belongs to.
+6. The `book.authorId` column is used to link a book to the author it belongs to. This column is indexed in order to ease the selection of an author's books. A foreign key is defined from `book.authorId` column to `authors.id`, so that SQLite guarantees that no book refers to a missing author. The `onDelete: .cascade` option has SQLite automatically delete all of an author's books when that author is deleted. See [Foreign Key Actions](https://sqlite.org/foreignkeys.html#fk_actions) for more information.
 7. The `book.authorId` column is not null so that SQLite guarantees that all books have an author.
-8. The `book.authorId` column is indexed in order to ease the selection of an author's books.
-9. We define a foreign key from `book.authorId` column to `authors.id`, so that SQLite guarantees that no book can refer to a missing author. On top of that, the `onDelete: .cascade` option has SQLite automatically delete all of an author's books when that author is deleted. See [Foreign Key Actions](https://sqlite.org/foreignkeys.html#fk_actions) for more information.
 
 Thanks to this database schema, the application will always process *consistent data*, no matter how wrong the Swift code can get. Even after a hard crash, all books will have an author, a non-nil title, etc.
 
@@ -65,16 +61,16 @@ Thanks to this database schema, the application will always process *consistent 
 
 **Define one record type per database table.** This record type will be responsible for writing in this table.
 
-**Let's start from regular structs** whose properties match the columns in their database table. Those structs conform to the standard [`Identifiable`] protocol because they have an identifier (the primary key). They conform to the standard [`Codable`] protocol so that we don't have to write the methods that convert to and from raw database rows.
+**Let's start from regular structs** whose properties match the columns in their database table. They conform to the standard [`Codable`] protocol so that we don't have to write the methods that convert to and from raw database rows.
 
 ```swift
-struct Author: Codable, Identifiable {
+struct Author: Codable {
     var id: Int64?
     var name: String
     var countryCode: String?
 }
 
-struct Book: Codable, Identifiable {
+struct Book: Codable {
     var id: Int64?
     var authorId: Int64
     var title: String
@@ -133,7 +129,7 @@ let books = try dbQueue.read { db in
 >     t.column("countryCode", .text)    // Can be NULL
 > }
 >
-> struct Author: Codable, Identifiable {
+> struct Author: Codable {
 >     var id: Int64?
 >     var name: String         // Not optional
 >     var countryCode: String? // Optional
@@ -154,6 +150,25 @@ let books = try dbQueue.read { db in
 >     try Author.find(db, id: authorID)
 > }
 > ```
+>
+> Take care that **`Identifiable` is not a good fit for optional ids**. You will frequently meet optional ids for records with auto-incremented ids:
+>
+> ```swift
+> struct Player: Codable {
+>     var id: Int64? // Optional ids are not suitable for Identifiable
+>     var name: String
+>     var score: Int
+> }
+> 
+> extension Player: FetchableRecord, MutablePersistableRecord {
+>     // Update auto-incremented id upon successful insertion
+>     mutating func didInsert(_ inserted: InsertionSuccess) {
+>         id = inserted.rowID
+>     }
+> }
+> ```
+>
+> For more details about auto-incremented ids and `Identifiable`, see [issue #1435](https://github.com/groue/GRDB.swift/issues/1435#issuecomment-1740857712).
 
 ### Record Types Hide Intimate Database Details
 

@@ -21,11 +21,13 @@ We'll address all of those challenges below.
 >
 > Always consider sharing plain files, or any other inter-process communication technique, before sharing an SQLite database.
 
-## Use a Database Pool
+## Use the WAL mode
 
-In order to access a shared database, use a ``DatabasePool``. It opens the database in the [WAL mode], which helps sharing a database.
+In order to access a shared database, use a ``DatabasePool``. It opens the database in the [WAL mode], which helps sharing a database because it allows multiple processes to access the database concurrently.
 
-Since several processes may open the database at the same time, protect the creation of the database pool with an [NSFileCoordinator].
+It is also possible to use a ``DatabaseQueue``, with the `.wal` ``Configuration/journalMode``.
+
+Since several processes may open the database at the same time, protect the creation of the database connection with an [NSFileCoordinator].
 
 - In a process that can create and write in the database, use this sample code:
     
@@ -150,11 +152,14 @@ If several processes want to write in the database, configure the database pool 
 
 ```swift
 var configuration = Configuration()
+configuration.defaultTransactionKind = .immediate
 configuration.busyMode = .timeout(/* a TimeInterval */)
 let dbPool = try DatabasePool(path: ..., configuration: configuration)
 ```
 
-With such a setup, you may still get `SQLITE_BUSY` errors from all write operations. They will occur if the database remains locked by another process for longer than the specified timeout. You can catch those errors:
+Both the `defaultTransactionKind` and `busyMode` are important for preventing `SQLITE_BUSY`. The `immediate` transaction kind prevents write transactions from overlapping, and the busy timeout has write transactions wait, instead of throwing `SQLITE_BUSY`, whenever another process is writing.
+
+With such a setup, you will still get `SQLITE_BUSY` errors if the database remains locked by another process for longer than the specified timeout. You can catch those errors:
 
 ```swift
 do {
@@ -226,9 +231,7 @@ In applications that use the background modes supported by iOS, post `resumeNoti
 
 <doc:DatabaseObservation> features are not able to detect database changes performed by other processes.
 
-Whenever you need to notify other processes that the database has been changed, you will have to use a cross-process notification mechanism such as [NSFileCoordinator] or [CFNotificationCenterGetDarwinNotifyCenter].
-
-You can trigger those notifications automatically with ``DatabaseRegionObservation``:
+Whenever you need to notify other processes that the database has been changed, you will have to use a cross-process notification mechanism such as [NSFileCoordinator] or [CFNotificationCenterGetDarwinNotifyCenter]. You can trigger those notifications automatically with ``DatabaseRegionObservation``:
 
 ```swift
 // Notify all changes made to the database
@@ -243,6 +246,8 @@ let observer = try observation.start(in: dbPool) { db in
     // Notify other processes
 }
 ```
+
+The processes that observe the database can catch those notifications, and deal with the notified changes. See <doc:GRDB/TransactionObserver#Dealing-with-Undetected-Changes> for some related techniques.
 
 [NSFileCoordinator]: https://developer.apple.com/documentation/foundation/nsfilecoordinator
 [CFNotificationCenterGetDarwinNotifyCenter]: https://developer.apple.com/documentation/corefoundation/1542572-cfnotificationcentergetdarwinnot

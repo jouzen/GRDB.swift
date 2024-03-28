@@ -26,10 +26,7 @@ migrator.registerMigration("Create authors") { db in
 migrator.registerMigration("Add books and author.birthYear") { db in
     try db.create(table: "book") { t in
         t.autoIncrementedPrimaryKey("id")
-        t.column("authorId", .integer)
-            .notNull()
-            .indexed()
-            .references("author", onDelete: .cascade)
+        t.belongsTo("author").notNull()
         t.column("title", .text).notNull()
     }
 
@@ -236,7 +233,7 @@ To prevent a migration from committing foreign key violations on disk, you can:
     }
     ```
 
-As in the above example, check for foreign key violations with the ``Database/checkForeignKeys()`` and ``Database/checkForeignKeys(in:)`` methods. They throw a nicely detailed ``DatabaseError`` that contains a lot of debugging information:
+As in the above example, check for foreign key violations with the ``Database/checkForeignKeys()`` and ``Database/checkForeignKeys(in:in:)`` methods. They throw a nicely detailed ``DatabaseError`` that contains a lot of debugging information:
 
 ```swift
 // SQLite error 19: FOREIGN KEY constraint violation - from book(authorId) to author(id),

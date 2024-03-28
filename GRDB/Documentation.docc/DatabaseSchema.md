@@ -1,5 +1,7 @@
 # The Database Schema
 
+Define or query the database schema.
+
 ## Overview
 
 **GRDB supports all database schemas, and has no requirement.** Any existing SQLite database can be opened, and you are free to structure your new databases as you wish.
@@ -16,7 +18,7 @@ try db.create(table: "player") { t in
 
 When you plan to evolve the schema as new versions of your application ship, wrap all schema changes in <doc:Migrations>.
 
-Prefer Swift methods over raw SQL queries. They allow the compiler to check if a schema change is available on the target operating system. Only use a raw SQL query when no Swift method exist (when creating views or triggers, for example).
+Prefer Swift methods over raw SQL queries. They allow the compiler to check if a schema change is available on the target operating system. Only use a raw SQL query when no Swift method exist (when creating triggers, for example).
 
 When a schema change is not directly supported by SQLite, or not available on the target operating system, database tables have to be recreated. See <doc:Migrations> for the detailed procedure.
 
@@ -24,7 +26,9 @@ When a schema change is not directly supported by SQLite, or not available on th
 
 Even though all schema are supported, some features of the library and of the Swift language are easier to use when the schema follows a few conventions described below.
 
-When those conventions are not applied, or not applicable, you will have to perform extra configurations.  
+When those conventions are not applied, or not applicable, you will have to perform extra configurations.
+
+For recommendations specific to JSON columns, see <doc:JSON>.
 
 ### Table names should be English, singular, and camelCased
 
@@ -135,8 +139,8 @@ try db.create(table: "team") { t in
 try db.create(table: "membership") { t in
     // Composite primary key
     t.primaryKey {
-        t.column("playerId", .integer).references("player")
-        t.column("teamId", .text).references("team")
+        t.belongsTo("player")
+        t.belongsTo("team")
     }
     t.column("role", .text).notNull()
 }
@@ -161,11 +165,6 @@ struct Player: Codable {
     var rowid: Int64?
     var name: String
     var score: Int
-}
-
-extension Player: Identifiable {
-    // Required because the primary key column is not 'id'
-    var id: Int64? { rowid }
 }
 
 extension Player: FetchableRecord, MutablePersistableRecord {
@@ -241,10 +240,10 @@ Unique indexes makes sure SQLite prevents the insertion of conflicting rows:
 // RECOMMENDED
 try db.create(table: "player") { t in
     t.autoIncrementedPrimaryKey("id")
+    t.belongsTo("team").notNull()
+    t.column("position", .integer).notNull()
     // Players must have distinct names
     t.column("name", .text).unique()
-    t.column("teamId", .integer).notNull().references("team")
-    t.column("position", .integer).notNull()
 }
 
 // One single player at any given position in a team
@@ -307,7 +306,7 @@ try db.create(table: "player") { t in
     t.autoIncrementedPrimaryKey("id")
     t.column("name", .text).notNull()
     // A player must refer to an existing team
-    t.column("teamId", .integer).notNull().references("team")
+    t.belongsTo("team").notNull()
 }
 
 // REQUIRES EXTRA CONFIGURATION
@@ -318,6 +317,8 @@ try db.create(table: "player") { t in
     t.column("teamId", .integer).notNull()
 }
 ```
+
+See ``TableDefinition/belongsTo(_:inTable:onDelete:onUpdate:deferred:indexed:)`` for more information about the creation of foreign keys.
 
 GRDB [Associations](https://github.com/groue/GRDB.swift/blob/master/Documentation/AssociationsBasics.md) are automatically configured from foreign keys declared in the database schema:
 
@@ -372,27 +373,35 @@ extension Team: TableRecord {
 - ``TableOptions``
 - ``VirtualTableModule``
 
+### Database Views
+
+- ``Database/create(view:options:columns:as:)``
+- ``Database/create(view:options:columns:asLiteral:)``
+- ``Database/drop(view:)``
+- ``ViewOptions``
+
 ### Database Indexes
 
 - ``Database/create(indexOn:columns:options:condition:)``
 - ``Database/create(index:on:columns:options:condition:)``
+- ``Database/create(index:on:expressions:options:condition:)``
 - ``Database/drop(indexOn:columns:)``
 - ``Database/drop(index:)``
 - ``IndexOptions``
 
 ### Querying the Database Schema
 
-- ``Database/columns(in:)``
-- ``Database/foreignKeys(on:)``
-- ``Database/indexes(on:)``
+- ``Database/columns(in:in:)``
+- ``Database/foreignKeys(on:in:)``
+- ``Database/indexes(on:in:)``
 - ``Database/isGRDBInternalTable(_:)``
 - ``Database/isSQLiteInternalTable(_:)``
-- ``Database/primaryKey(_:)``
+- ``Database/primaryKey(_:in:)``
 - ``Database/schemaVersion()``
 - ``Database/table(_:hasUniqueKey:)``
-- ``Database/tableExists(_:)``
-- ``Database/triggerExists(_:)``
-- ``Database/viewExists(_:)``
+- ``Database/tableExists(_:in:)``
+- ``Database/triggerExists(_:in:)``
+- ``Database/viewExists(_:in:)``
 - ``ColumnInfo``
 - ``ForeignKeyInfo``
 - ``IndexInfo``
@@ -401,9 +410,9 @@ extension Team: TableRecord {
 ### Integrity Checks
 
 - ``Database/checkForeignKeys()``
-- ``Database/checkForeignKeys(in:)``
+- ``Database/checkForeignKeys(in:in:)``
 - ``Database/foreignKeyViolations()``
-- ``Database/foreignKeyViolations(in:)``
+- ``Database/foreignKeyViolations(in:in:)``
 - ``ForeignKeyViolation``
 
 ### Sunsetted Methods
