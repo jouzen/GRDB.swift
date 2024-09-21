@@ -1,0 +1,6 @@
+# The `CODEOWNERS` file defines who the code owners for specific or global files/directories in the repository are.
+
+# These owners will be the default reviewers for pull requests that touch these files/directories.
+
+# Default owners for every file in the repo.
+*       
