@@ -1,0 +1,75 @@
+# Reference for the catalog-info.yaml file format can be found at https://backstage.io/docs/features/software-catalog/descriptor-format
+#
+# This file contains example entries for System and Component entities. Neither entity contains all possible fields, but
+# it's recommended to fill in at least the given ones. Take a look at the file format to see what other are available.
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: System
+
+# Most fields under metadata are common to all kinds of entities.
+metadata:
+  # The name of the entity, must be unique per kind within the catalog.
+  # Length between 1-64 characters. Allowed characters are [a-zA-Z0-9] possibly separated by one of [-_.].
+  name: todo-add-me
+
+  # A display name of the entity, to be presented in user interfaces instead of the name property above, when available.
+  # Recommended to keep it shortish and descriptive. No strict format requirements.
+  title: Todo Add Me
+
+  # A human readable description of the entity, to be shown in Backstage.
+  description: |
+    Todo add me.
+
+spec:
+  # Owner of the entity. Find the correct owner from https://backstage.oura.cloud/catalog?filters%5Bkind%5D=group&filters%5Buser%5D=all.
+  owner: group:todo-add-me
+
+  # ŌURA domain for the entity. Find the correct domain from https://backstage.oura.cloud/catalog?filters%5Bkind%5D=domain&filters%5Buser%5D=all.
+  domain: todo-add-me
+
+---
+apiVersion: backstage.io/v1alpha1
+
+# Kind of the entity. 'Component' is just an example, and the rest of the fields are specific to the kind. See file format for possible options.
+kind: Component
+metadata:
+  # Same as for the System entity.
+  name: todo-add-me
+  title: todo-add-me
+  description: |
+    Todo add me.
+  annotations:
+    # The value of this annotation informs where TechDocs source content (mkdocs.yml, in relation to catalog-info.yaml)
+    # is stored. If you repository does not have documentation defined TechDocs, kickstart the project from Backstage's
+    # Software Templates: https://backstage.oura.cloud/create/templates/default/backstage-techdocs.
+    backstage.io/techdocs-ref: dir:.
+
+    # Kubernetes components can be linked to the entity with correct labeling: https://backstage.io/docs/features/kubernetes/configuration.
+    backstage.io/kubernetes-id: todo-add-me
+    backstage.io/kubernetes-namespace: todo-add-me
+
+    # GitHub repository slug (org/repo) for the component. Specifying this annotation will enable GitHub related
+    # features in Backstage for that entity.
+    github.com/project-slug: jouzen/todo-add-me
+
+  # A list of single-valued strings, for example to classify catalog entities in various ways.
+  tags:
+    - todo-add-me
+
+  # A list of external hyperlinks related to the entity. Will be shown in the entities Software Catalog entry.
+  links:
+    - url: todo-add-me
+      title: todo-add-me
+spec:
+  # Type of the component. One of 'algorithm', 'app', 'component', 'library', 'service', 'tool', or 'website'.
+  type: service
+
+  # The lifecycle state of the component, one 'experimental', 'production', or 'deprecated'.
+  lifecycle: todo-add-me
+
+  # Same as for the System entity.
+  owner: group:todo-add-me
+
+  # Name of the system that this entity belongs to.
+  system: backstage
